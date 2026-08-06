@@ -24,19 +24,19 @@ async function fetchGoldPrice() {
         const sjc = data.find(item => item.brand === 'SJC' || (item.name && item.name.includes('SJC')));
         
         if (sjc) {
-            return `🌟 Cập nhật giá vàng SJC:\n- Mua vào: ${sjc.buy} VNĐ\n- Bán ra: ${sjc.sell} VNĐ\n- Thời gian: ${new Date().toLocaleString('vi-VN')}`;
+            return `🌟 Cập nhật giá vàng SJC:\n- Mua vào: ${sjc.buy} VNĐ\n- Bán ra: ${sjc.sell} VNĐ\n- Thời gian: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
         }
         throw new Error('Không tìm thấy dữ liệu SJC');
     } catch (error) {
-        return `🌟 [BẢN TEST] Cập nhật giá vàng SJC:\n- Mua vào: 78.500.000 VNĐ\n- Bán ra: 80.500.000 VNĐ\n- Thời gian: ${new Date().toLocaleString('vi-VN')}`;
+        return `🌟 [BẢN TEST] Cập nhật giá vàng SJC:\n- Mua vào: 78.500.000 VNĐ\n- Bán ra: 80.500.000 VNĐ\n- Thời gian: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
     }
 }
 
 bot.onText(/\/giavang/, async (msg) => {
     const chatId = msg.chat.id;
-    bot.sendMessage(chatId, '⏳ Đang lấy giá vàng mới nhất, chờ chút nhé...');
+    await bot.sendMessage(chatId, '⏳ Đang lấy giá vàng mới nhất, chờ chút nhé...');
     const message = await fetchGoldPrice();
-    bot.sendMessage(chatId, message);
+    await bot.sendMessage(chatId, message);
 });
 
 bot.onText(/\/start/, (msg) => {
