@@ -24,11 +24,13 @@ async function fetchGoldPrice() {
         const sjc = data.find(item => item.brand === 'SJC' || (item.name && item.name.includes('SJC')));
         
         if (sjc) {
-            return `🌟 Cập nhật giá vàng SJC:\n- Mua vào: ${sjc.buy} VNĐ\n- Bán ra: ${sjc.sell} VNĐ\n- Thời gian: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+            const giaChiMua = (parseInt(sjc.buy.replace(/\D/g, '')) / 10).toLocaleString('vi-VN');
+            const giaChiBan = (parseInt(sjc.sell.replace(/\D/g, '')) / 10).toLocaleString('vi-VN');
+            return `🌟 Cập nhật giá vàng:\n- SJC 1 Lượng: Mua ${sjc.buy} - Bán ${sjc.sell}\n- SJC 1 Chỉ: Mua ${giaChiMua} - Bán ${giaChiBan}\n- Thời gian: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
         }
         throw new Error('Không tìm thấy dữ liệu SJC');
     } catch (error) {
-        return `🌟 [BẢN TEST] Cập nhật giá vàng SJC:\n- Mua vào: 78.500.000 VNĐ\n- Bán ra: 80.500.000 VNĐ\n- Thời gian: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
+        return `💍 [BẢN TEST] Giá Vàng Nhẫn Trơn 9999 (1 Chỉ):\n- Mua vào: 7.650.000 VNĐ\n- Bán ra: 7.790.000 VNĐ\n- Thời gian: ${new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' })}`;
     }
 }
 
