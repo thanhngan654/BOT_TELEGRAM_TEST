@@ -234,26 +234,32 @@ bot.on('callback_query', async (query) => {
                     inlineKeyboard.push([{ text: btnText, callback_data: `i_${restId}_${item.id}` }]);
                 }
                 
+                // Tạo nội dung tin nhắn kèm link Grab
+                let textCaption = `👇 Mời chọn món tại <b>${menu.name}</b>:`;
+                if (menu.url) {
+                    textCaption += `\n🔗 <a href="${menu.url}">Xem ảnh/món ăn trên ứng dụng Grab</a>`;
+                }
+
                 // Nếu có ảnh banner thì xóa tin nhắn cũ, gửi tin ảnh mới
                 if (menu.banner_image) {
                     try { await bot.deleteMessage(chatId, query.message.message_id); } catch(e) {}
                     try {
                         await bot.sendPhoto(chatId, menu.banner_image, {
-                            caption: `👇 Mời chọn món tại <b>${menu.name}</b>:`,
+                            caption: textCaption,
                             parse_mode: 'HTML',
                             reply_markup: { inline_keyboard: inlineKeyboard }
                         });
                     } catch (err) {
                         console.error('Lỗi gửi ảnh banner, chuyển sang dạng text:', err.message);
                         // Fallback: Gửi tin nhắn text nếu ảnh bị lỗi (Vd: ảnh SVG)
-                        await bot.sendMessage(chatId, `👇 Mời chọn món tại <b>${menu.name}</b>:`, {
+                        await bot.sendMessage(chatId, textCaption, {
                             parse_mode: 'HTML',
                             reply_markup: { inline_keyboard: inlineKeyboard }
                         });
                     }
                 } else {
                     // Nếu không có ảnh thì edit text như bình thường
-                    await bot.editMessageText(`👇 Mời chọn món tại <b>${menu.name}</b>:`, {
+                    await bot.editMessageText(textCaption, {
                         chat_id: chatId,
                         message_id: query.message.message_id,
                         parse_mode: 'HTML',
