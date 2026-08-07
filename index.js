@@ -392,6 +392,11 @@ app.get('/', (req, res) => {
     res.send('Bot Tài Chính & Cơm Trưa đang hoạt động!');
 });
 
+app.get('/setup', (req, res) => {
+    const path = require('path');
+    res.sendFile(path.join(__dirname, 'setup_bookmarklet.html'));
+});
+
 // API Đẩy thực đơn từ Tool bên ngoài vào
 app.post('/api/menu', (req, res) => {
     try {
