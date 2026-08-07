@@ -29,33 +29,19 @@ if (GEMINI_API_KEY) {
 
 const ORDERS_FILE = path.join(__dirname, 'orders.json');
 const MENU_FILE = path.join(__dirname, 'menu.json');
+const DEBTS_FILE = path.join(__dirname, 'debts.json');
 
 // --- QUẢN LÝ BỘ NHỚ ---
 let menus = [];
-let globalOrders = {};
+let globalOrders = {}; // Dữ liệu mới: { restId: { restName: 'A', users: { username: [ {name, price} ] } } }
+let debts = {};
 
-try {
-    menus = JSON.parse(fs.readFileSync(MENU_FILE, 'utf8'));
-} catch (e) {
-    console.error('Lỗi đọc menu.json', e);
-}
+try { menus = JSON.parse(fs.readFileSync(MENU_FILE, 'utf8')); } catch (e) {}
+try { if (fs.existsSync(ORDERS_FILE)) globalOrders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8')); } catch (e) {}
+try { if (fs.existsSync(DEBTS_FILE)) debts = JSON.parse(fs.readFileSync(DEBTS_FILE, 'utf8')); } catch (e) {}
 
-try {
-    if (fs.existsSync(ORDERS_FILE)) {
-        globalOrders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8'));
-    }
-} catch (e) {
-    console.error('Lỗi đọc orders.json', e);
-    globalOrders = {};
-}
-
-function saveOrders() {
-    try {
-        fs.writeFileSync(ORDERS_FILE, JSON.stringify(globalOrders, null, 2));
-    } catch (e) {
-        console.error('Lỗi ghi orders.json', e);
-    }
-}
+function saveOrders() { fs.writeFileSync(ORDERS_FILE, JSON.stringify(globalOrders, null, 2)); }
+function saveDebts() { fs.writeFileSync(DEBTS_FILE, JSON.stringify(debts, null, 2)); }
 
 // --- HÀM SCRAPING ---
 async function fetchRealGoldPrice() {
@@ -297,34 +283,31 @@ bot.onText(/\/ds/, async (msg) => {
     try {
         const chatId = msg.chat.id;
         
-        let hasOrders = false;
-        for (const user in globalOrders) {
-            if (globalOrders[user] && globalOrders[user].length > 0) {
-                hasOrders = true;
-                break;
-            }
-        }
-        
-        if (!hasOrders) {
+        if (Object.keys(globalOrders).length === 0) {
             return bot.sendMessage(chatId, '📭 Hiện chưa có ai đặt món nào!');
         }
         
-        let text = '📋 <b>DANH SÁCH ĐẶT CƠM</b>\n\n';
-        let totalItems = {};
+        let text = '📋 <b>DANH SÁCH ĐẶT CƠM (CHƯA CHỐT)</b>\n\n';
+        let restIndex = 1;
         
-        for (const [user, items] of Object.entries(globalOrders)) {
-            if (items.length > 0) {
-                text += `👤 @${user}:\n`;
-                items.forEach(item => {
-                    text += `  - ${item}\n`;
-                    totalItems[item] = (totalItems[item] || 0) + 1;
-                });
+        for (const [restId, restData] of Object.entries(globalOrders)) {
+            let restTotal = 0;
+            text += `🏪 <b>[ID: ${restIndex}] ${restData.restName}</b>\n`;
+            
+            for (const [user, items] of Object.entries(restData.users)) {
+                if (items.length > 0) {
+                    let userTotal = 0;
+                    text += `👤 @${user}:\n`;
+                    items.forEach(item => {
+                        text += `  - ${item.name} (${item.price.toLocaleString()}đ)\n`;
+                        userTotal += item.price;
+                    });
+                    restTotal += userTotal;
+                }
             }
-        }
-        
-        text += '\n🛒 <b>TỔNG HỢP ĐI ĐẶT GRAB:</b>\n';
-        for (const [item, count] of Object.entries(totalItems)) {
-            text += `- ${count} x ${item}\n`;
+            text += `👉 <b>Tổng gốc quán này: ${restTotal.toLocaleString()}đ</b>\n`;
+            text += `📝 <i>Chốt đơn quán này: /chotdon ${restIndex} [Tổng_Tiền_Đã_Giảm]</i>\n\n`;
+            restIndex++;
         }
         
         await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
@@ -338,10 +321,23 @@ bot.onText(/\/huy/, async (msg) => {
         const chatId = msg.chat.id;
         const user = msg.from.username || msg.from.first_name || 'Khách';
         
-        if (globalOrders[user] && globalOrders[user].length > 0) {
-            const removed = globalOrders[user].pop(); 
+        let removedItem = null;
+        let removedRestName = '';
+        
+        for (const restId in globalOrders) {
+            if (globalOrders[restId].users[user] && globalOrders[restId].users[user].length > 0) {
+                removedItem = globalOrders[restId].users[user].pop();
+                removedRestName = globalOrders[restId].restName;
+                
+                if (globalOrders[restId].users[user].length === 0) delete globalOrders[restId].users[user];
+                if (Object.keys(globalOrders[restId].users).length === 0) delete globalOrders[restId];
+                break;
+            }
+        }
+        
+        if (removedItem) {
             saveOrders();
-            await bot.sendMessage(chatId, `🗑 @${user} đã hủy món: <b>${removed}</b>`, { parse_mode: 'HTML' });
+            await bot.sendMessage(chatId, `🗑 @${user} đã hủy món: <b>${removedItem.name}</b> (tại ${removedRestName})`, { parse_mode: 'HTML' });
         } else {
             await bot.sendMessage(chatId, `⚠ @${user} chưa đặt món nào để hủy!`);
         }
@@ -350,12 +346,84 @@ bot.onText(/\/huy/, async (msg) => {
     }
 });
 
-bot.onText(/\/chotdon/, async (msg) => {
+bot.onText(/\/chotdon(?:\s+(\d+)\s+(\d+))?/, async (msg, match) => {
     try {
         const chatId = msg.chat.id;
-        globalOrders = {};
+        
+        if (!match[1] || !match[2]) {
+            return bot.sendMessage(chatId, '⚠ Cú pháp sai! Vui lòng dùng: `/chotdon <ID_Quán> <Số_tiền_thực_tế>`\nVí dụ: `/chotdon 1 100000`', { parse_mode: 'Markdown' });
+        }
+        
+        const targetIndex = parseInt(match[1]);
+        const finalPrice = parseInt(match[2]);
+        
+        const restIds = Object.keys(globalOrders);
+        if (targetIndex < 1 || targetIndex > restIds.length) {
+            return bot.sendMessage(chatId, `⚠ Không tìm thấy ID quán là ${targetIndex}! Gõ /ds để xem.`);
+        }
+        
+        const restId = restIds[targetIndex - 1];
+        const restData = globalOrders[restId];
+        
+        let originalTotal = 0;
+        let userTotals = {};
+        
+        for (const [user, items] of Object.entries(restData.users)) {
+            let uTotal = items.reduce((sum, item) => sum + item.price, 0);
+            userTotals[user] = uTotal;
+            originalTotal += uTotal;
+        }
+        
+        if (originalTotal === 0) {
+            return bot.sendMessage(chatId, `⚠ Quán này không có đơn.`);
+        }
+        
+        const ratio = finalPrice / originalTotal;
+        
+        let reportText = `✅ <b>ĐÃ CHỐT ĐƠN: ${restData.restName}</b>\n`;
+        reportText += `💰 Tổng gốc: ${originalTotal.toLocaleString()}đ -> <b>Thực thu: ${finalPrice.toLocaleString()}đ</b> (Tỷ lệ thực trả ~$((ratio * 100).toFixed(1)}%)\n\n`;
+        
+        for (const [user, uTotal] of Object.entries(userTotals)) {
+            if (uTotal > 0) {
+                const finalUserDebt = Math.round(uTotal * ratio);
+                debts[user] = (debts[user] || 0) + finalUserDebt;
+                reportText += `👤 @${user}: nợ <b>${finalUserDebt.toLocaleString()}đ</b>\n`;
+            }
+        }
+        
+        reportText += `\n<i>Số tiền nợ đã cộng vào danh sách. Gõ /rc để thanh toán!</i>`;
+        
+        delete globalOrders[restId];
         saveOrders();
-        await bot.sendMessage(chatId, '✅ <b>Đã chốt đơn và reset lại danh sách.</b> Mọi người chuẩn bị ăn ngon nhé 😋', { parse_mode: 'HTML' });
+        saveDebts();
+        
+        await bot.sendMessage(chatId, reportText, { parse_mode: 'HTML' });
+    } catch (e) {
+        console.error(e);
+    }
+});
+
+bot.onText(/\/rc/, async (msg) => {
+    try {
+        const chatId = msg.chat.id;
+        
+        const debtors = Object.keys(debts).filter(u => debts[u] > 0);
+        if (debtors.length === 0) {
+            return bot.sendMessage(chatId, '🎉 Hiện tại không có ai nợ tiền cơm!');
+        }
+        
+        let text = '💸 <b>DANH SÁCH NHẮC NỢ (Click để lấy mã QR chuyển khoản):</b>\n\n';
+        
+        const inlineKeyboard = debtors.map(user => ([
+            { text: `Thanh toán cho @${user} (${debts[user].toLocaleString()}đ)`, callback_data: `pay_${user}` }
+        ]));
+        
+        await bot.sendMessage(chatId, text, {
+            parse_mode: 'HTML',
+            reply_markup: {
+                inline_keyboard: inlineKeyboard
+            }
+        });
     } catch (e) {
         console.error(e);
     }
@@ -380,7 +448,8 @@ bot.onText(/\/start/, async (msg) => {
                        + `- /menu: Bấm nút để chọn món ăn trưa\n`
                        + `- /ds: Xem danh sách tổng hợp ai đã đặt món gì\n`
                        + `- /huy: Xóa món ăn bạn vừa bấm chọn nhầm\n`
-                       + `- /chotdon: (Dành cho Admin) Xóa trắng danh sách để bắt đầu ngày mới.`;
+                       + `- /chotdon <ID> <Tiền>: (Admin) Chốt hóa đơn của 1 quán và chia đều mã giảm giá
+                       - /rc: Hiển thị danh sách nợ & Mã QR thanh toán.`;
         await bot.sendMessage(msg.chat.id, helpText, { parse_mode: 'HTML' });
     } catch (e) {
         console.error(e);
