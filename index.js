@@ -1,18 +1,12 @@
 require('dotenv').config();
-const axios = require('axios');
-const cron = require('node-cron');
 const TelegramBot = require('node-telegram-bot-api');
 const BotClass = TelegramBot.default || TelegramBot;
 const express = require('express');
-const cheerio = require('cheerio');
-const Parser = require('rss-parser');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 
 if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
     console.error('❌ THIẾU BIẾN MÔI TRƯỜNG: Vui lòng cung cấp TELEGRAM_TOKEN và TELEGRAM_CHAT_ID');
@@ -20,12 +14,6 @@ if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
 }
 
 const bot = new BotClass(TELEGRAM_TOKEN, { polling: true });
-const rssParser = new Parser();
-
-let genAI = null;
-if (GEMINI_API_KEY) {
-    genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-}
 
 const ORDERS_FILE = path.join(__dirname, 'orders.json');
 const MENU_FILE = path.join(__dirname, 'menu.json');
@@ -43,132 +31,6 @@ try { if (fs.existsSync(DEBTS_FILE)) debts = JSON.parse(fs.readFileSync(DEBTS_FI
 function saveOrders() { fs.writeFileSync(ORDERS_FILE, JSON.stringify(globalOrders, null, 2)); }
 function saveDebts() { fs.writeFileSync(DEBTS_FILE, JSON.stringify(debts, null, 2)); }
 
-// --- HÀM SCRAPING ---
-async function fetchRealGoldPrice() {
-    try {
-        const response = await axios.get('https://webgia.com/gia-vang/', { timeout: 8000 });
-        const html = response.data;
-        const $ = cheerio.load(html);
-        
-        let buyPrice = '';
-        let sellPrice = '';
-        
-        $('table tbody tr').each((i, el) => {
-            const name = $(el).find('td').first().text().toLowerCase();
-            if (name.includes('nhẫn') && name.includes('9999')) {
-                const buy = $(el).find('td').eq(1).text().trim();
-                const sell = $(el).find('td').eq(2).text().trim();
-                if (buy && sell && !buyPrice) {
-                    buyPrice = buy;
-                    sellPrice = sell;
-                }
-            }
-        });
-
-        if (buyPrice && sellPrice) {
-            return {
-                title: 'Vàng Nhẫn 9999',
-                buy: buyPrice,
-                sell: sellPrice,
-                text: `💍 Cập nhật giá Vàng Nhẫn 9999 (1 Chỉ):\n- Mua vào: ${buyPrice}\n- Bán ra: ${sellPrice}\n- Nguồn: webgia.com`
-            };
-        }
-        throw new Error('Không tìm thấy dữ liệu Nhẫn 9999 trên webgia');
-    } catch (error) {
-        return {
-             title: 'Mock Data Nhẫn 9999',
-             buy: '13.980.000',
-             sell: '14.280.000',
-             text: `💍 [BẢN TEST] Giá Vàng Nhẫn Trơn 9999 (1 Chỉ):\n- Mua vào: 13.980.000 VNĐ\n- Bán ra: 14.280.000 VNĐ`
-        };
-    }
-}
-
-async function fetchStockNews() {
-    try {
-        const feed = await rssParser.parseURL('https://cafef.vn/thi-truong-chung-khoan.rss');
-        const news = feed.items.slice(0, 5).map((item, index) => `${index + 1}. ${item.title}`).join('\n');
-        return news;
-    } catch (error) {
-        console.error('Lỗi cào tin:', error.message);
-        return '1. Chứng khoán biến động mạnh.\n2. HPG tăng trần.\n3. MWG doanh thu tốt.\n4. Giá vàng lập đỉnh.\n5. Tỷ giá ổn định.';
-    }
-}
-
-async function getAIAnalysis(goldData, newsText) {
-    if (!genAI) {
-        return "⚠️ Bạn chưa cấu hình GEMINI_API_KEY. Bot đã lấy được tin tức nhưng không thể phân tích được.";
-    }
-    
-    try {
-        let model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-        const prompt = `Bạn là một chuyên gia phân tích tài chính. Dưới đây là thông tin thị trường hôm nay:
-        1. Giá vàng hiện tại: ${goldData.text}
-        2. Top 5 tin tức chứng khoán nổi bật:
-        ${newsText}
-        
-        Nhiệm vụ của bạn: Dựa trên kiến thức của bạn và các thông tin trên, hãy viết một bản tin tổng hợp ngắn gọn (khoảng 3-4 đoạn). 
-        Hãy nhận định chi tiết về quá khứ, hiện tại và tương lai của 3 danh mục đầu tư sau:
-        - Giá vàng
-        - Cổ phiếu MWG (Thế giới di động)
-        - Cổ phiếu HPG (Tập đoàn Hòa Phát)
-        
-        Giọng văn: Chuyên nghiệp, súc tích và có ích cho nhà đầu tư cá nhân mua tích sản.`;
-
-        try {
-            const result = await model.generateContent(prompt);
-            return result.response.text();
-        } catch (e) {
-            console.warn("Lỗi bản flash, chuyển sang gemini-pro", e.message);
-            model = genAI.getGenerativeModel({ model: "gemini-pro" });
-            const result = await model.generateContent(prompt);
-            return result.response.text();
-        }
-    } catch (error) {
-        console.error('Lỗi gọi AI:', error.message);
-        return "❌ Có lỗi xảy ra khi gọi Trí Tuệ Nhân Tạo. Có thể do quá tải, xin hãy thử lại sau.";
-    }
-}
-
-
-// --- XỬ LÝ LỆNH TELEGRAM VÀNG VÀ CHỨNG KHOÁN ---
-bot.onText(/\/giavang/, async (msg) => {
-    try {
-        const chatId = msg.chat.id;
-        await bot.sendMessage(chatId, '⏳ Đang cào dữ liệu giá vàng mới nhất, chờ chút nhé...');
-        const goldData = await fetchRealGoldPrice();
-        const timeNow = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-        await bot.sendMessage(chatId, `${goldData.text}\n- Thời gian: ${timeNow}`);
-    } catch (e) {
-        console.error(e);
-    }
-});
-
-bot.onText(/\/tonghop/, async (msg) => {
-    try {
-        const chatId = msg.chat.id;
-        await bot.sendMessage(chatId, '⏳ Đang đi gom tin tức, xem giá vàng và nhờ chuyên gia AI phân tích... Hãy làm một ngụm trà, quá trình này mất khoảng 5-10 giây nhé! 🍵');
-        
-        const goldData = await fetchRealGoldPrice();
-        const newsText = await fetchStockNews();
-        const analysis = await getAIAnalysis(goldData, newsText);
-        const timeNow = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-        
-        const finalMessage = `📊 BÁO CÁO TỔNG HỢP & NHẬN ĐỊNH (${timeNow})\n\n`
-                           + `📰 TIN TỨC NỔI BẬT TRONG NGÀY:\n${newsText}\n\n`
-                           + `💡 NHẬN ĐỊNH TỪ CHUYÊN GIA AI:\n${analysis}`;
-                           
-        if (finalMessage.length > 4000) {
-            await bot.sendMessage(chatId, finalMessage.substring(0, 4000));
-            await bot.sendMessage(chatId, finalMessage.substring(4000));
-        } else {
-            // Loại bỏ parse_mode để tránh sập bot do Markdown lỗi từ AI
-            await bot.sendMessage(chatId, finalMessage);
-        }
-    } catch (err) {
-        console.error(err);
-    }
-});
 
 
 // --- XỬ LÝ LỆNH MENU GỌI MÓN ---
@@ -520,28 +382,14 @@ bot.onText(/\/del(?:\s+(\d+))?/, async (msg, match) => {
 // --- LỆNH KHỞI ĐỘNG CƠ BẢN ---
 bot.onText(/\/start/, async (msg) => {
     try {
-        const helpText = `Xin chào! Tôi là Trợ Lý Văn Phòng 🤖\n\n`
-                       + `📈 <b>Tài chính:</b>\n`
-                       + `- /giavang: Xem giá vàng nhẫn 9999\n`
-                       + `- /tonghop: AI nhận định chứng khoán (MWG, HPG, Vàng)\n\n`
+        const helpText = `Xin chào! Tôi là Trợ Lý Đặt Cơm 🤖\n\n`
                        + `🍱 <b>Ăn uống:</b>\n`
                        + `- /menu: Bấm nút để chọn món ăn trưa\n`
                        + `- /ds: Xem danh sách tổng hợp ai đã đặt món gì\n`
                        + `- /huy: Xóa món ăn bạn vừa bấm chọn nhầm\n`
-                       + `- /chotdon <ID> <Tiền>: (Admin) Chốt hóa đơn của 1 quán và chia đều mã giảm giá
-                       - /rc: Hiển thị danh sách nợ & Mã QR thanh toán.`;
+                       + `- /chotdon <ID> <Tiền>: (Admin) Chốt hóa đơn của 1 quán và chia đều mã giảm giá\n`
+                       + `- /rc: Hiển thị danh sách nợ & Mã QR thanh toán.`;
         await bot.sendMessage(msg.chat.id, helpText, { parse_mode: 'HTML' });
-    } catch (e) {
-        console.error(e);
-    }
-});
-
-cron.schedule('0 8 * * *', async () => {
-    console.log('⏰ Tới 8h sáng rồi, tự động gửi báo cáo...');
-    try {
-        const goldData = await fetchRealGoldPrice();
-        const timeNow = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-        bot.sendMessage(TELEGRAM_CHAT_ID, `🌅 CHÀO BUỔI SÁNG!\n${goldData.text}\n- Thời gian: ${timeNow}`);
     } catch (e) {
         console.error(e);
     }

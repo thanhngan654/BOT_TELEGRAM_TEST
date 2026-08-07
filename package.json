@@ -1,5 +1,5 @@
 {
-  "name": "gold_price_bot",
+  "name": "bot_dat_com",
   "version": "1.0.0",
   "main": "index.js",
   "scripts": {
@@ -11,15 +11,10 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
-    "@google/generative-ai": "^0.24.1",
-    "axios": "^1.19.0",
-    "cheerio": "^1.0.0-rc.12",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
     "express": "^5.2.1",
-    "node-cron": "^4.2.1",
     "node-telegram-bot-api": "^1.2.0",
-    "rss-parser": "^3.13.0",
     "undici": "^5.29.0"
   }
 }
