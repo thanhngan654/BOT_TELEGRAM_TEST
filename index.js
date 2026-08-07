@@ -10,7 +10,6 @@ const { GoogleGenerativeAI } = require('@google/generative-ai');
 const fs = require('fs');
 const path = require('path');
 
-// Cấu hình môi trường
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const TELEGRAM_CHAT_ID = process.env.TELEGRAM_CHAT_ID;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
@@ -23,27 +22,42 @@ if (!TELEGRAM_TOKEN || !TELEGRAM_CHAT_ID) {
 const bot = new BotClass(TELEGRAM_TOKEN, { polling: true });
 const rssParser = new Parser();
 
-// Cấu hình AI
 let genAI = null;
 if (GEMINI_API_KEY) {
     genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 }
 
-// Data files
 const ORDERS_FILE = path.join(__dirname, 'orders.json');
 const MENU_FILE = path.join(__dirname, 'menu.json');
 
+// --- QUẢN LÝ BỘ NHỚ ---
 let menus = [];
+let globalOrders = {};
+
 try {
     menus = JSON.parse(fs.readFileSync(MENU_FILE, 'utf8'));
 } catch (e) {
     console.error('Lỗi đọc menu.json', e);
 }
 
+try {
+    if (fs.existsSync(ORDERS_FILE)) {
+        globalOrders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8'));
+    }
+} catch (e) {
+    console.error('Lỗi đọc orders.json', e);
+    globalOrders = {};
+}
+
+function saveOrders() {
+    try {
+        fs.writeFileSync(ORDERS_FILE, JSON.stringify(globalOrders, null, 2));
+    } catch (e) {
+        console.error('Lỗi ghi orders.json', e);
+    }
+}
 
 // --- HÀM SCRAPING ---
-
-// 1. Hàm cào giá vàng nhẫn thật từ webgia.com
 async function fetchRealGoldPrice() {
     try {
         const response = await axios.get('https://webgia.com/gia-vang/', { timeout: 8000 });
@@ -84,7 +98,6 @@ async function fetchRealGoldPrice() {
     }
 }
 
-// 2. Hàm cào tin tức chứng khoán (Dùng RSS CafeF)
 async function fetchStockNews() {
     try {
         const feed = await rssParser.parseURL('https://cafef.vn/thi-truong-chung-khoan.rss');
@@ -96,16 +109,13 @@ async function fetchStockNews() {
     }
 }
 
-// 3. Hàm gọi AI (Gemini) để nhận định
 async function getAIAnalysis(goldData, newsText) {
     if (!genAI) {
         return "⚠️ Bạn chưa cấu hình GEMINI_API_KEY. Bot đã lấy được tin tức nhưng không thể phân tích được.";
     }
     
     try {
-        // Cố gắng dùng bản flash mới nhất
         let model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
-        
         const prompt = `Bạn là một chuyên gia phân tích tài chính. Dưới đây là thông tin thị trường hôm nay:
         1. Giá vàng hiện tại: ${goldData.text}
         2. Top 5 tin tức chứng khoán nổi bật:
@@ -136,20 +146,23 @@ async function getAIAnalysis(goldData, newsText) {
 
 
 // --- XỬ LÝ LỆNH TELEGRAM VÀNG VÀ CHỨNG KHOÁN ---
-
 bot.onText(/\/giavang/, async (msg) => {
-    const chatId = msg.chat.id;
-    await bot.sendMessage(chatId, '⏳ Đang cào dữ liệu giá vàng mới nhất, chờ chút nhé...');
-    const goldData = await fetchRealGoldPrice();
-    const timeNow = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-    await bot.sendMessage(chatId, `${goldData.text}\n- Thời gian: ${timeNow}`);
+    try {
+        const chatId = msg.chat.id;
+        await bot.sendMessage(chatId, '⏳ Đang cào dữ liệu giá vàng mới nhất, chờ chút nhé...');
+        const goldData = await fetchRealGoldPrice();
+        const timeNow = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+        await bot.sendMessage(chatId, `${goldData.text}\n- Thời gian: ${timeNow}`);
+    } catch (e) {
+        console.error(e);
+    }
 });
 
 bot.onText(/\/tonghop/, async (msg) => {
-    const chatId = msg.chat.id;
-    await bot.sendMessage(chatId, '⏳ Đang đi gom tin tức, xem giá vàng và nhờ chuyên gia AI phân tích... Hãy làm một ngụm trà, quá trình này mất khoảng 5-10 giây nhé! 🍵');
-    
     try {
+        const chatId = msg.chat.id;
+        await bot.sendMessage(chatId, '⏳ Đang đi gom tin tức, xem giá vàng và nhờ chuyên gia AI phân tích... Hãy làm một ngụm trà, quá trình này mất khoảng 5-10 giây nhé! 🍵');
+        
         const goldData = await fetchRealGoldPrice();
         const newsText = await fetchStockNews();
         const analysis = await getAIAnalysis(goldData, newsText);
@@ -166,177 +179,185 @@ bot.onText(/\/tonghop/, async (msg) => {
             await bot.sendMessage(chatId, finalMessage, { parse_mode: 'Markdown' });
         }
     } catch (err) {
-        await bot.sendMessage(chatId, "❌ Đã có lỗi xảy ra trong quá trình tổng hợp. Vui lòng thử lại sau.");
         console.error(err);
     }
 });
 
 
 // --- XỬ LÝ LỆNH MENU GỌI MÓN ---
-
-bot.onText(/\/menu/, (msg) => {
-    const chatId = msg.chat.id;
-    if (menus.length === 0) {
-        return bot.sendMessage(chatId, '⚠ Hiện chưa có danh sách quán ăn nào. Admin vui lòng cấu hình menu.json.');
-    }
-    
-    const inlineKeyboard = menus.map(menu => ([
-        { text: menu.name, callback_data: `rest_${menu.id}` }
-    ]));
-    
-    bot.sendMessage(chatId, '🍽 **HÔM NAY ĂN GÌ?**\nBấm vào nút bên dưới để xem menu quán nhé:', {
-        parse_mode: 'Markdown',
-        reply_markup: {
-            inline_keyboard: inlineKeyboard
+bot.onText(/\/menu/, async (msg) => {
+    try {
+        const chatId = msg.chat.id;
+        if (menus.length === 0) {
+            return bot.sendMessage(chatId, '⚠ Hiện chưa có danh sách quán ăn nào. Admin vui lòng cấu hình menu.json.');
         }
-    });
-});
-
-bot.on('callback_query', (query) => {
-    const chatId = query.message.chat.id;
-    const data = query.data;
-    const user = query.from.username || query.from.first_name || 'Khách';
-
-    if (data.startsWith('rest_')) {
-        const restId = data.replace('rest_', '');
-        const menu = menus.find(m => m.id === restId);
         
-        if (menu) {
-            const inlineKeyboard = [];
-            // Chia 2 cột cho đẹp
-            for (let i = 0; i < menu.items.length; i += 2) {
-                const row = [];
-                row.push({ text: menu.items[i].name, callback_data: `item_${restId}_${menu.items[i].id}` });
-                if (menu.items[i+1]) {
-                    row.push({ text: menu.items[i+1].name, callback_data: `item_${restId}_${menu.items[i+1].id}` });
-                }
-                inlineKeyboard.push(row);
+        const inlineKeyboard = menus.map(menu => ([
+            { text: menu.name, callback_data: `rest_${menu.id}` }
+        ]));
+        
+        await bot.sendMessage(chatId, '🍽 **HÔM NAY ĂN GÌ?**\nBấm vào nút bên dưới để xem menu quán nhé:', {
+            parse_mode: 'Markdown',
+            reply_markup: {
+                inline_keyboard: inlineKeyboard
             }
+        });
+    } catch (e) {
+        console.error(e);
+    }
+});
+
+bot.on('callback_query', async (query) => {
+    try {
+        const chatId = query.message.chat.id;
+        const data = query.data;
+        const user = query.from.username || query.from.first_name || 'Khách';
+
+        if (data.startsWith('rest_')) {
+            const restId = data.replace('rest_', '');
+            const menu = menus.find(m => m.id === restId);
             
-            // Cập nhật lại tin nhắn bằng menu các món
-            bot.editMessageText(`👇 Mời chọn món tại **${menu.name}**:`, {
-                chat_id: chatId,
-                message_id: query.message.message_id,
-                parse_mode: 'Markdown',
-                reply_markup: {
-                    inline_keyboard: inlineKeyboard
+            if (menu) {
+                const inlineKeyboard = [];
+                for (let i = 0; i < menu.items.length; i += 2) {
+                    const row = [];
+                    row.push({ text: menu.items[i].name, callback_data: `item_${restId}_${menu.items[i].id}` });
+                    if (menu.items[i+1]) {
+                        row.push({ text: menu.items[i+1].name, callback_data: `item_${restId}_${menu.items[i+1].id}` });
+                    }
+                    inlineKeyboard.push(row);
                 }
-            });
-        }
-    } else if (data.startsWith('item_')) {
-        const parts = data.split('_');
-        const restId = parts[1];
-        const itemId = parts.slice(2).join('_');
-        
-        const menu = menus.find(m => m.id === restId);
-        const item = menu?.items.find(i => i.id === itemId);
-        
-        if (item) {
-            let orders = {};
-            if (fs.existsSync(ORDERS_FILE)) {
-                orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8'));
+                
+                await bot.editMessageText(`👇 Mời chọn món tại **${menu.name}**:`, {
+                    chat_id: chatId,
+                    message_id: query.message.message_id,
+                    parse_mode: 'Markdown',
+                    reply_markup: {
+                        inline_keyboard: inlineKeyboard
+                    }
+                });
             }
+        } else if (data.startsWith('item_')) {
+            const parts = data.split('_');
+            const restId = parts[1];
+            const itemId = parts.slice(2).join('_');
             
-            if (!orders[user]) orders[user] = [];
-            orders[user].push(item.name);
+            const menu = menus.find(m => m.id === restId);
+            const item = menu?.items.find(i => i.id === itemId);
             
-            fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
-            
-            // Báo cho user biết đã bấm thành công
-            bot.answerCallbackQuery(query.id, { text: `✅ Đã thêm: ${item.name}` });
-            
-            // Gửi thông báo vào group
-            bot.sendMessage(chatId, `✅ @${user} vừa đặt: **${item.name}**`, { parse_mode: 'Markdown' });
+            if (item) {
+                // Update in-memory storage
+                if (!globalOrders[user]) globalOrders[user] = [];
+                globalOrders[user].push(item.name);
+                // Save to file
+                saveOrders();
+                
+                await bot.answerCallbackQuery(query.id, { text: `✅ Đã thêm: ${item.name}` });
+                await bot.sendMessage(chatId, `✅ @${user} vừa đặt: **${item.name}**`, { parse_mode: 'Markdown' });
+            }
         }
+    } catch (e) {
+        console.error('Callback query error:', e);
     }
 });
 
-bot.onText(/\/ds/, (msg) => {
-    const chatId = msg.chat.id;
-    let orders = {};
-    if (fs.existsSync(ORDERS_FILE)) {
-        try {
-            orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8'));
-        } catch(e) {}
-    }
-    
-    if (Object.keys(orders).length === 0) {
-        return bot.sendMessage(chatId, '📭 Hiện chưa có ai đặt món nào!');
-    }
-    
-    let text = '📋 **DANH SÁCH ĐẶT CƠM**\n\n';
-    let totalItems = {};
-    
-    // Liệt kê theo người
-    for (const [user, items] of Object.entries(orders)) {
-        if (items.length > 0) {
-            text += `👤 @${user}:\n`;
-            items.forEach(item => {
-                text += `  - ${item}\n`;
-                totalItems[item] = (totalItems[item] || 0) + 1;
-            });
+bot.onText(/\/ds/, async (msg) => {
+    try {
+        const chatId = msg.chat.id;
+        
+        let hasOrders = false;
+        for (const user in globalOrders) {
+            if (globalOrders[user] && globalOrders[user].length > 0) {
+                hasOrders = true;
+                break;
+            }
         }
-    }
-    
-    // Liệt kê tổng hợp
-    text += '\n🛒 **TỔNG HỢP ĐI ĐẶT GRAB:**\n';
-    for (const [item, count] of Object.entries(totalItems)) {
-        text += `- ${count} x ${item}\n`;
-    }
-    
-    bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
-});
-
-bot.onText(/\/huy/, (msg) => {
-    const chatId = msg.chat.id;
-    const user = msg.from.username || msg.from.first_name || 'Khách';
-    
-    let orders = {};
-    if (fs.existsSync(ORDERS_FILE)) {
-        try {
-            orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8'));
-        } catch(e) {}
-    }
-    
-    if (orders[user] && orders[user].length > 0) {
-        const removed = orders[user].pop(); // Xóa món đặt cuối cùng
-        fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
-        bot.sendMessage(chatId, `🗑 @${user} đã hủy món: **${removed}**`, { parse_mode: 'Markdown' });
-    } else {
-        bot.sendMessage(chatId, `⚠ @${user} chưa đặt món nào để hủy!`);
+        
+        if (!hasOrders) {
+            return bot.sendMessage(chatId, '📭 Hiện chưa có ai đặt món nào!');
+        }
+        
+        let text = '📋 **DANH SÁCH ĐẶT CƠM**\n\n';
+        let totalItems = {};
+        
+        for (const [user, items] of Object.entries(globalOrders)) {
+            if (items.length > 0) {
+                text += `👤 @${user}:\n`;
+                items.forEach(item => {
+                    text += `  - ${item}\n`;
+                    totalItems[item] = (totalItems[item] || 0) + 1;
+                });
+            }
+        }
+        
+        text += '\n🛒 **TỔNG HỢP ĐI ĐẶT GRAB:**\n';
+        for (const [item, count] of Object.entries(totalItems)) {
+            text += `- ${count} x ${item}\n`;
+        }
+        
+        await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+    } catch (e) {
+        console.error(e);
     }
 });
 
-bot.onText(/\/chotdon/, (msg) => {
-    const chatId = msg.chat.id;
-    fs.writeFileSync(ORDERS_FILE, JSON.stringify({}));
-    bot.sendMessage(chatId, '✅ **Đã chốt đơn và reset lại danh sách.** Mọi người chuẩn bị ăn ngon nhé 😋', { parse_mode: 'Markdown' });
+bot.onText(/\/huy/, async (msg) => {
+    try {
+        const chatId = msg.chat.id;
+        const user = msg.from.username || msg.from.first_name || 'Khách';
+        
+        if (globalOrders[user] && globalOrders[user].length > 0) {
+            const removed = globalOrders[user].pop(); 
+            saveOrders();
+            await bot.sendMessage(chatId, `🗑 @${user} đã hủy món: **${removed}**`, { parse_mode: 'Markdown' });
+        } else {
+            await bot.sendMessage(chatId, `⚠ @${user} chưa đặt món nào để hủy!`);
+        }
+    } catch (e) {
+        console.error(e);
+    }
 });
 
+bot.onText(/\/chotdon/, async (msg) => {
+    try {
+        const chatId = msg.chat.id;
+        globalOrders = {};
+        saveOrders();
+        await bot.sendMessage(chatId, '✅ **Đã chốt đơn và reset lại danh sách.** Mọi người chuẩn bị ăn ngon nhé 😋', { parse_mode: 'Markdown' });
+    } catch (e) {
+        console.error(e);
+    }
+});
 
 // --- LỆNH KHỞI ĐỘNG CƠ BẢN ---
-bot.onText(/\/start/, (msg) => {
-    const helpText = `Xin chào! Tôi là Trợ Lý Văn Phòng 🤖\n\n`
-                   + `📈 **Tài chính:**\n`
-                   + `- /giavang: Xem giá vàng nhẫn 9999\n`
-                   + `- /tonghop: AI nhận định chứng khoán (MWG, HPG, Vàng)\n\n`
-                   + `🍱 **Ăn uống:**\n`
-                   + `- /menu: Bấm nút để chọn món ăn trưa\n`
-                   + `- /ds: Xem danh sách tổng hợp ai đã đặt món gì\n`
-                   + `- /huy: Xóa món ăn bạn vừa bấm chọn nhầm\n`
-                   + `- /chotdon: (Dành cho Admin) Xóa trắng danh sách để bắt đầu ngày mới.`;
-    bot.sendMessage(msg.chat.id, helpText);
+bot.onText(/\/start/, async (msg) => {
+    try {
+        const helpText = `Xin chào! Tôi là Trợ Lý Văn Phòng 🤖\n\n`
+                       + `📈 **Tài chính:**\n`
+                       + `- /giavang: Xem giá vàng nhẫn 9999\n`
+                       + `- /tonghop: AI nhận định chứng khoán (MWG, HPG, Vàng)\n\n`
+                       + `🍱 **Ăn uống:**\n`
+                       + `- /menu: Bấm nút để chọn món ăn trưa\n`
+                       + `- /ds: Xem danh sách tổng hợp ai đã đặt món gì\n`
+                       + `- /huy: Xóa món ăn bạn vừa bấm chọn nhầm\n`
+                       + `- /chotdon: (Dành cho Admin) Xóa trắng danh sách để bắt đầu ngày mới.`;
+        await bot.sendMessage(msg.chat.id, helpText);
+    } catch (e) {
+        console.error(e);
+    }
 });
 
-// Cron job báo giá lúc 8h sáng
 cron.schedule('0 8 * * *', async () => {
     console.log('⏰ Tới 8h sáng rồi, tự động gửi báo cáo...');
-    const goldData = await fetchRealGoldPrice();
-    const timeNow = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
-    bot.sendMessage(TELEGRAM_CHAT_ID, `🌅 CHÀO BUỔI SÁNG!\n${goldData.text}\n- Thời gian: ${timeNow}`);
+    try {
+        const goldData = await fetchRealGoldPrice();
+        const timeNow = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+        bot.sendMessage(TELEGRAM_CHAT_ID, `🌅 CHÀO BUỔI SÁNG!\n${goldData.text}\n- Thời gian: ${timeNow}`);
+    } catch (e) {
+        console.error(e);
+    }
 });
 
-// --- SERVER GIẢ CHO RENDER ---
 const app = express();
 app.get('/', (req, res) => {
     res.send('Bot Tài Chính & Cơm Trưa đang hoạt động!');
