@@ -90,8 +90,8 @@ async function getAIAnalysis(goldData, newsText) {
     }
     
     try {
-        // Dùng mô hình flash để tốc độ phản hồi nhanh nhất (phù hợp cho Bot chat)
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // Cố gắng dùng bản flash mới nhất
+        let model = genAI.getGenerativeModel({ model: "gemini-1.5-flash-latest" });
         
         const prompt = `Bạn là một chuyên gia phân tích tài chính. Dưới đây là thông tin thị trường hôm nay:
         1. Giá vàng hiện tại: ${goldData.text}
@@ -106,8 +106,16 @@ async function getAIAnalysis(goldData, newsText) {
         
         Giọng văn: Chuyên nghiệp, súc tích và có ích cho nhà đầu tư cá nhân mua tích sản.`;
 
-        const result = await model.generateContent(prompt);
-        return result.response.text();
+        try {
+            const result = await model.generateContent(prompt);
+            return result.response.text();
+        } catch (e) {
+            // Fallback sang gemini-pro nếu tài khoản không hỗ trợ bản flash
+            console.warn("Lỗi bản flash, chuyển sang gemini-pro", e.message);
+            model = genAI.getGenerativeModel({ model: "gemini-pro" });
+            const result = await model.generateContent(prompt);
+            return result.response.text();
+        }
     } catch (error) {
         console.error('Lỗi gọi AI:', error.message);
         return "❌ Có lỗi xảy ra khi gọi Trí Tuệ Nhân Tạo. Có thể do quá tải, xin hãy thử lại sau.";
