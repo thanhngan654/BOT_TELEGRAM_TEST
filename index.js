@@ -288,7 +288,7 @@ bot.on('callback_query', async (query) => {
             const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${accountName}`;
             
             const inlineConfirm = [
-                [{ text: `✅ Admin Xác Nhận: @${userOwe} Đã Chuyển ${amount.toLocaleString()}đ`, callback_data: `confirm_${userOwe}` }]
+                [{ text: `💸 Bấm vào đây nếu bạn đã chuyển khoản xong`, callback_data: `confirm_${userOwe}` }]
             ];
             
             await bot.sendPhoto(chatId, qrUrl, {
@@ -300,18 +300,19 @@ bot.on('callback_query', async (query) => {
             
         } else if (data.startsWith('confirm_')) {
             const userOwe = data.replace('confirm_', '');
+            const clicker = query.from.username || query.from.first_name || 'Khách';
             
             if (!debts[userOwe] || debts[userOwe] <= 0) {
-                return bot.answerCallbackQuery(query.id, { text: `⚠ Người này đã được xác nhận trước đó rồi!`, show_alert: true });
+                return bot.answerCallbackQuery(query.id, { text: `⚠ Quá trình thanh toán này đã được ghi nhận rồi!`, show_alert: true });
             }
             
             debts[userOwe] = 0; // Xóa nợ
             saveDebts();
             
-            await bot.answerCallbackQuery(query.id, { text: `✅ Đã xác nhận thanh toán!` });
+            await bot.answerCallbackQuery(query.id, { text: `✅ Đã ghi nhận thanh toán!` });
             
             // Xóa nút bấm xác nhận để tránh bấm 2 lần
-            await bot.editMessageCaption(`✅ <b>Admin đã xác nhận @${userOwe} thanh toán xong!</b>`, {
+            await bot.editMessageCaption(`✅ <b>@${clicker} đã báo cáo là @${userOwe} đã chuyển khoản xong!</b>`, {
                 chat_id: chatId,
                 message_id: query.message.message_id,
                 parse_mode: 'HTML',
@@ -489,6 +490,28 @@ bot.onText(/\/rc/, async (msg) => {
 bot.onText(/\/id/, async (msg) => {
     try {
         await bot.sendMessage(msg.chat.id, `🆔 Chat ID của nhóm/đoạn chat này là: <code>${msg.chat.id}</code>`, { parse_mode: 'HTML' });
+    } catch (e) {
+        console.error(e);
+    }
+});
+
+bot.onText(/\/del(?:\s+(\d+))?/, async (msg, match) => {
+    try {
+        const chatId = msg.chat.id;
+        
+        if (!match[1]) {
+            return bot.sendMessage(chatId, '⚠ Cú pháp sai! Vui lòng dùng: `/del <ID_Quán>`\nVí dụ: `/del 1`', { parse_mode: 'Markdown' });
+        }
+        
+        const targetIndex = parseInt(match[1]);
+        if (targetIndex < 1 || targetIndex > menus.length) {
+            return bot.sendMessage(chatId, `⚠ Không tìm thấy ID quán là ${targetIndex}! Gõ /menu để xem danh sách.`);
+        }
+        
+        const deletedMenu = menus.splice(targetIndex - 1, 1)[0];
+        fs.writeFileSync(MENU_FILE, JSON.stringify(menus, null, 2));
+        
+        await bot.sendMessage(chatId, `🗑 <b>Đã xóa quán:</b> ${deletedMenu.name} (ID: ${targetIndex}) khỏi Menu!`, { parse_mode: 'HTML' });
     } catch (e) {
         console.error(e);
     }
