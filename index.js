@@ -7,6 +7,8 @@ const express = require('express');
 const cheerio = require('cheerio');
 const Parser = require('rss-parser');
 const { GoogleGenerativeAI } = require('@google/generative-ai');
+const fs = require('fs');
+const path = require('path');
 
 // Cấu hình môi trường
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -27,6 +29,20 @@ if (GEMINI_API_KEY) {
     genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 }
 
+// Data files
+const ORDERS_FILE = path.join(__dirname, 'orders.json');
+const MENU_FILE = path.join(__dirname, 'menu.json');
+
+let menus = [];
+try {
+    menus = JSON.parse(fs.readFileSync(MENU_FILE, 'utf8'));
+} catch (e) {
+    console.error('Lỗi đọc menu.json', e);
+}
+
+
+// --- HÀM SCRAPING ---
+
 // 1. Hàm cào giá vàng nhẫn thật từ webgia.com
 async function fetchRealGoldPrice() {
     try {
@@ -37,13 +53,12 @@ async function fetchRealGoldPrice() {
         let buyPrice = '';
         let sellPrice = '';
         
-        // Cào bảng giá để lấy Nhẫn tròn 9999
         $('table tbody tr').each((i, el) => {
             const name = $(el).find('td').first().text().toLowerCase();
             if (name.includes('nhẫn') && name.includes('9999')) {
                 const buy = $(el).find('td').eq(1).text().trim();
                 const sell = $(el).find('td').eq(2).text().trim();
-                if (buy && sell && !buyPrice) { // Lấy kết quả đầu tiên
+                if (buy && sell && !buyPrice) {
                     buyPrice = buy;
                     sellPrice = sell;
                 }
@@ -60,7 +75,6 @@ async function fetchRealGoldPrice() {
         }
         throw new Error('Không tìm thấy dữ liệu Nhẫn 9999 trên webgia');
     } catch (error) {
-        // Mock data fallback
         return {
              title: 'Mock Data Nhẫn 9999',
              buy: '13.980.000',
@@ -74,12 +88,11 @@ async function fetchRealGoldPrice() {
 async function fetchStockNews() {
     try {
         const feed = await rssParser.parseURL('https://cafef.vn/thi-truong-chung-khoan.rss');
-        // Lấy 5 bài báo mới nhất
         const news = feed.items.slice(0, 5).map((item, index) => `${index + 1}. ${item.title}`).join('\n');
         return news;
     } catch (error) {
         console.error('Lỗi cào tin:', error.message);
-        return '1. Chứng khoán biến động mạnh trong phiên chiều.\n2. Khối ngoại tiếp tục bán ròng cổ phiếu thép HPG.\n3. MWG (Thế giới di động) công bố doanh thu tăng trưởng ấn tượng trong tháng.\n4. Giá vàng thế giới lập đỉnh lịch sử mới.\n5. Ngân hàng nhà nước có động thái mới để ổn định tỷ giá.';
+        return '1. Chứng khoán biến động mạnh.\n2. HPG tăng trần.\n3. MWG doanh thu tốt.\n4. Giá vàng lập đỉnh.\n5. Tỷ giá ổn định.';
     }
 }
 
@@ -110,7 +123,6 @@ async function getAIAnalysis(goldData, newsText) {
             const result = await model.generateContent(prompt);
             return result.response.text();
         } catch (e) {
-            // Fallback sang gemini-pro nếu tài khoản không hỗ trợ bản flash
             console.warn("Lỗi bản flash, chuyển sang gemini-pro", e.message);
             model = genAI.getGenerativeModel({ model: "gemini-pro" });
             const result = await model.generateContent(prompt);
@@ -123,7 +135,7 @@ async function getAIAnalysis(goldData, newsText) {
 }
 
 
-// --- XỬ LÝ LỆNH TELEGRAM ---
+// --- XỬ LÝ LỆNH TELEGRAM VÀNG VÀ CHỨNG KHOÁN ---
 
 bot.onText(/\/giavang/, async (msg) => {
     const chatId = msg.chat.id;
@@ -138,20 +150,15 @@ bot.onText(/\/tonghop/, async (msg) => {
     await bot.sendMessage(chatId, '⏳ Đang đi gom tin tức, xem giá vàng và nhờ chuyên gia AI phân tích... Hãy làm một ngụm trà, quá trình này mất khoảng 5-10 giây nhé! 🍵');
     
     try {
-        // 1. Thu thập dữ liệu
         const goldData = await fetchRealGoldPrice();
         const newsText = await fetchStockNews();
-        
-        // 2. Gọi AI
         const analysis = await getAIAnalysis(goldData, newsText);
-        
-        // 3. Gửi báo cáo
         const timeNow = new Date().toLocaleString('vi-VN', { timeZone: 'Asia/Ho_Chi_Minh' });
+        
         const finalMessage = `📊 BÁO CÁO TỔNG HỢP & NHẬN ĐỊNH (${timeNow})\n\n`
                            + `📰 TIN TỨC NỔI BẬT TRONG NGÀY:\n${newsText}\n\n`
                            + `💡 NHẬN ĐỊNH TỪ CHUYÊN GIA AI:\n${analysis}`;
                            
-        // Telegram giới hạn độ dài tin nhắn (khoảng 4096 ký tự), phải chia nhỏ nếu quá dài
         if (finalMessage.length > 4000) {
             await bot.sendMessage(chatId, finalMessage.substring(0, 4000));
             await bot.sendMessage(chatId, finalMessage.substring(4000));
@@ -164,10 +171,164 @@ bot.onText(/\/tonghop/, async (msg) => {
     }
 });
 
-bot.onText(/\/start/, (msg) => {
-    bot.sendMessage(msg.chat.id, 'Xin chào! Tôi là Trợ Lý Đầu Tư 🤖\n\n- Gõ /giavang để xem giá vàng nhẫn.\n- Gõ /tonghop để xem tin tức và nhận định (MWG, HPG, Vàng) từ AI.\n- Mỗi 8h sáng hàng ngày tôi sẽ tự động gửi bảng giá vàng cho bạn nhé!');
+
+// --- XỬ LÝ LỆNH MENU GỌI MÓN ---
+
+bot.onText(/\/menu/, (msg) => {
+    const chatId = msg.chat.id;
+    if (menus.length === 0) {
+        return bot.sendMessage(chatId, '⚠ Hiện chưa có danh sách quán ăn nào. Admin vui lòng cấu hình menu.json.');
+    }
+    
+    const inlineKeyboard = menus.map(menu => ([
+        { text: menu.name, callback_data: `rest_${menu.id}` }
+    ]));
+    
+    bot.sendMessage(chatId, '🍽 **HÔM NAY ĂN GÌ?**\nBấm vào nút bên dưới để xem menu quán nhé:', {
+        parse_mode: 'Markdown',
+        reply_markup: {
+            inline_keyboard: inlineKeyboard
+        }
+    });
 });
 
+bot.on('callback_query', (query) => {
+    const chatId = query.message.chat.id;
+    const data = query.data;
+    const user = query.from.username || query.from.first_name || 'Khách';
+
+    if (data.startsWith('rest_')) {
+        const restId = data.replace('rest_', '');
+        const menu = menus.find(m => m.id === restId);
+        
+        if (menu) {
+            const inlineKeyboard = [];
+            // Chia 2 cột cho đẹp
+            for (let i = 0; i < menu.items.length; i += 2) {
+                const row = [];
+                row.push({ text: menu.items[i].name, callback_data: `item_${restId}_${menu.items[i].id}` });
+                if (menu.items[i+1]) {
+                    row.push({ text: menu.items[i+1].name, callback_data: `item_${restId}_${menu.items[i+1].id}` });
+                }
+                inlineKeyboard.push(row);
+            }
+            
+            // Cập nhật lại tin nhắn bằng menu các món
+            bot.editMessageText(`👇 Mời chọn món tại **${menu.name}**:`, {
+                chat_id: chatId,
+                message_id: query.message.message_id,
+                parse_mode: 'Markdown',
+                reply_markup: {
+                    inline_keyboard: inlineKeyboard
+                }
+            });
+        }
+    } else if (data.startsWith('item_')) {
+        const parts = data.split('_');
+        const restId = parts[1];
+        const itemId = parts.slice(2).join('_');
+        
+        const menu = menus.find(m => m.id === restId);
+        const item = menu?.items.find(i => i.id === itemId);
+        
+        if (item) {
+            let orders = {};
+            if (fs.existsSync(ORDERS_FILE)) {
+                orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8'));
+            }
+            
+            if (!orders[user]) orders[user] = [];
+            orders[user].push(item.name);
+            
+            fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
+            
+            // Báo cho user biết đã bấm thành công
+            bot.answerCallbackQuery(query.id, { text: `✅ Đã thêm: ${item.name}` });
+            
+            // Gửi thông báo vào group
+            bot.sendMessage(chatId, `✅ @${user} vừa đặt: **${item.name}**`, { parse_mode: 'Markdown' });
+        }
+    }
+});
+
+bot.onText(/\/ds/, (msg) => {
+    const chatId = msg.chat.id;
+    let orders = {};
+    if (fs.existsSync(ORDERS_FILE)) {
+        try {
+            orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8'));
+        } catch(e) {}
+    }
+    
+    if (Object.keys(orders).length === 0) {
+        return bot.sendMessage(chatId, '📭 Hiện chưa có ai đặt món nào!');
+    }
+    
+    let text = '📋 **DANH SÁCH ĐẶT CƠM**\n\n';
+    let totalItems = {};
+    
+    // Liệt kê theo người
+    for (const [user, items] of Object.entries(orders)) {
+        if (items.length > 0) {
+            text += `👤 @${user}:\n`;
+            items.forEach(item => {
+                text += `  - ${item}\n`;
+                totalItems[item] = (totalItems[item] || 0) + 1;
+            });
+        }
+    }
+    
+    // Liệt kê tổng hợp
+    text += '\n🛒 **TỔNG HỢP ĐI ĐẶT GRAB:**\n';
+    for (const [item, count] of Object.entries(totalItems)) {
+        text += `- ${count} x ${item}\n`;
+    }
+    
+    bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+});
+
+bot.onText(/\/huy/, (msg) => {
+    const chatId = msg.chat.id;
+    const user = msg.from.username || msg.from.first_name || 'Khách';
+    
+    let orders = {};
+    if (fs.existsSync(ORDERS_FILE)) {
+        try {
+            orders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8'));
+        } catch(e) {}
+    }
+    
+    if (orders[user] && orders[user].length > 0) {
+        const removed = orders[user].pop(); // Xóa món đặt cuối cùng
+        fs.writeFileSync(ORDERS_FILE, JSON.stringify(orders, null, 2));
+        bot.sendMessage(chatId, `🗑 @${user} đã hủy món: **${removed}**`, { parse_mode: 'Markdown' });
+    } else {
+        bot.sendMessage(chatId, `⚠ @${user} chưa đặt món nào để hủy!`);
+    }
+});
+
+bot.onText(/\/chotdon/, (msg) => {
+    const chatId = msg.chat.id;
+    fs.writeFileSync(ORDERS_FILE, JSON.stringify({}));
+    bot.sendMessage(chatId, '✅ **Đã chốt đơn và reset lại danh sách.** Mọi người chuẩn bị ăn ngon nhé 😋', { parse_mode: 'Markdown' });
+});
+
+
+// --- LỆNH KHỞI ĐỘNG CƠ BẢN ---
+bot.onText(/\/start/, (msg) => {
+    const helpText = `Xin chào! Tôi là Trợ Lý Văn Phòng 🤖\n\n`
+                   + `📈 **Tài chính:**\n`
+                   + `- /giavang: Xem giá vàng nhẫn 9999\n`
+                   + `- /tonghop: AI nhận định chứng khoán (MWG, HPG, Vàng)\n\n`
+                   + `🍱 **Ăn uống:**\n`
+                   + `- /menu: Bấm nút để chọn món ăn trưa\n`
+                   + `- /ds: Xem danh sách tổng hợp ai đã đặt món gì\n`
+                   + `- /huy: Xóa món ăn bạn vừa bấm chọn nhầm\n`
+                   + `- /chotdon: (Dành cho Admin) Xóa trắng danh sách để bắt đầu ngày mới.`;
+    bot.sendMessage(msg.chat.id, helpText);
+});
+
+// Cron job báo giá lúc 8h sáng
 cron.schedule('0 8 * * *', async () => {
     console.log('⏰ Tới 8h sáng rồi, tự động gửi báo cáo...');
     const goldData = await fetchRealGoldPrice();
@@ -178,7 +339,7 @@ cron.schedule('0 8 * * *', async () => {
 // --- SERVER GIẢ CHO RENDER ---
 const app = express();
 app.get('/', (req, res) => {
-    res.send('Bot Tài Chính đang hoạt động!');
+    res.send('Bot Tài Chính & Cơm Trưa đang hoạt động!');
 });
 
 const PORT = process.env.PORT || 3000;

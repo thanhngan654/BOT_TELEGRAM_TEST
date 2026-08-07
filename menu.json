@@ -1,0 +1,14 @@
+[
+  {
+    "id": "micayseoul",
+    "name": "Mì Cay Seoul 478 Lê Văn Việt",
+    "items": [
+      {"id": "mc_bo", "name": "🍜 Mì cay Bò"},
+      {"id": "mc_haisan", "name": "🦐 Mì cay Hải Sản"},
+      {"id": "mc_thapcam", "name": "🐙 Mì cay Thập Cẩm"},
+      {"id": "kimbap_thuong", "name": "🍣 Kimbap Thường"},
+      {"id": "kimbap_chien", "name": "🍤 Kimbap Chiên"},
+      {"id": "tra_sua", "name": "🥤 Trà Sữa Phúc Long"}
+    ]
+  }
+]
