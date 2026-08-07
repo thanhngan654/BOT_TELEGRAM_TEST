@@ -176,7 +176,8 @@ bot.onText(/\/tonghop/, async (msg) => {
             await bot.sendMessage(chatId, finalMessage.substring(0, 4000));
             await bot.sendMessage(chatId, finalMessage.substring(4000));
         } else {
-            await bot.sendMessage(chatId, finalMessage, { parse_mode: 'Markdown' });
+            // Loại bỏ parse_mode để tránh sập bot do Markdown lỗi từ AI
+            await bot.sendMessage(chatId, finalMessage);
         }
     } catch (err) {
         console.error(err);
@@ -196,8 +197,8 @@ bot.onText(/\/menu/, async (msg) => {
             { text: menu.name, callback_data: `rest_${menu.id}` }
         ]));
         
-        await bot.sendMessage(chatId, '🍽 **HÔM NAY ĂN GÌ?**\nBấm vào nút bên dưới để xem menu quán nhé:', {
-            parse_mode: 'Markdown',
+        await bot.sendMessage(chatId, '🍽 <b>HÔM NAY ĂN GÌ?</b>\nBấm vào nút bên dưới để xem menu quán nhé:', {
+            parse_mode: 'HTML',
             reply_markup: {
                 inline_keyboard: inlineKeyboard
             }
@@ -228,10 +229,10 @@ bot.on('callback_query', async (query) => {
                     inlineKeyboard.push(row);
                 }
                 
-                await bot.editMessageText(`👇 Mời chọn món tại **${menu.name}**:`, {
+                await bot.editMessageText(`👇 Mời chọn món tại <b>${menu.name}</b>:`, {
                     chat_id: chatId,
                     message_id: query.message.message_id,
-                    parse_mode: 'Markdown',
+                    parse_mode: 'HTML',
                     reply_markup: {
                         inline_keyboard: inlineKeyboard
                     }
@@ -253,7 +254,7 @@ bot.on('callback_query', async (query) => {
                 saveOrders();
                 
                 await bot.answerCallbackQuery(query.id, { text: `✅ Đã thêm: ${item.name}` });
-                await bot.sendMessage(chatId, `✅ @${user} vừa đặt: **${item.name}**`, { parse_mode: 'Markdown' });
+                await bot.sendMessage(chatId, `✅ @${user} vừa đặt: <b>${item.name}</b>`, { parse_mode: 'HTML' });
             }
         }
     } catch (e) {
@@ -277,7 +278,7 @@ bot.onText(/\/ds/, async (msg) => {
             return bot.sendMessage(chatId, '📭 Hiện chưa có ai đặt món nào!');
         }
         
-        let text = '📋 **DANH SÁCH ĐẶT CƠM**\n\n';
+        let text = '📋 <b>DANH SÁCH ĐẶT CƠM</b>\n\n';
         let totalItems = {};
         
         for (const [user, items] of Object.entries(globalOrders)) {
@@ -290,12 +291,12 @@ bot.onText(/\/ds/, async (msg) => {
             }
         }
         
-        text += '\n🛒 **TỔNG HỢP ĐI ĐẶT GRAB:**\n';
+        text += '\n🛒 <b>TỔNG HỢP ĐI ĐẶT GRAB:</b>\n';
         for (const [item, count] of Object.entries(totalItems)) {
             text += `- ${count} x ${item}\n`;
         }
         
-        await bot.sendMessage(chatId, text, { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
     } catch (e) {
         console.error(e);
     }
@@ -309,7 +310,7 @@ bot.onText(/\/huy/, async (msg) => {
         if (globalOrders[user] && globalOrders[user].length > 0) {
             const removed = globalOrders[user].pop(); 
             saveOrders();
-            await bot.sendMessage(chatId, `🗑 @${user} đã hủy món: **${removed}**`, { parse_mode: 'Markdown' });
+            await bot.sendMessage(chatId, `🗑 @${user} đã hủy món: <b>${removed}</b>`, { parse_mode: 'HTML' });
         } else {
             await bot.sendMessage(chatId, `⚠ @${user} chưa đặt món nào để hủy!`);
         }
@@ -323,7 +324,7 @@ bot.onText(/\/chotdon/, async (msg) => {
         const chatId = msg.chat.id;
         globalOrders = {};
         saveOrders();
-        await bot.sendMessage(chatId, '✅ **Đã chốt đơn và reset lại danh sách.** Mọi người chuẩn bị ăn ngon nhé 😋', { parse_mode: 'Markdown' });
+        await bot.sendMessage(chatId, '✅ <b>Đã chốt đơn và reset lại danh sách.</b> Mọi người chuẩn bị ăn ngon nhé 😋', { parse_mode: 'HTML' });
     } catch (e) {
         console.error(e);
     }
@@ -331,7 +332,7 @@ bot.onText(/\/chotdon/, async (msg) => {
 
 bot.onText(/\/id/, async (msg) => {
     try {
-        await bot.sendMessage(msg.chat.id, `🆔 Chat ID của nhóm/đoạn chat này là: \`${msg.chat.id}\``, { parse_mode: 'Markdown' });
+        await bot.sendMessage(msg.chat.id, `🆔 Chat ID của nhóm/đoạn chat này là: <code>${msg.chat.id}</code>`, { parse_mode: 'HTML' });
     } catch (e) {
         console.error(e);
     }
@@ -341,15 +342,15 @@ bot.onText(/\/id/, async (msg) => {
 bot.onText(/\/start/, async (msg) => {
     try {
         const helpText = `Xin chào! Tôi là Trợ Lý Văn Phòng 🤖\n\n`
-                       + `📈 **Tài chính:**\n`
+                       + `📈 <b>Tài chính:</b>\n`
                        + `- /giavang: Xem giá vàng nhẫn 9999\n`
                        + `- /tonghop: AI nhận định chứng khoán (MWG, HPG, Vàng)\n\n`
-                       + `🍱 **Ăn uống:**\n`
+                       + `🍱 <b>Ăn uống:</b>\n`
                        + `- /menu: Bấm nút để chọn món ăn trưa\n`
                        + `- /ds: Xem danh sách tổng hợp ai đã đặt món gì\n`
                        + `- /huy: Xóa món ăn bạn vừa bấm chọn nhầm\n`
                        + `- /chotdon: (Dành cho Admin) Xóa trắng danh sách để bắt đầu ngày mới.`;
-        await bot.sendMessage(msg.chat.id, helpText);
+        await bot.sendMessage(msg.chat.id, helpText, { parse_mode: 'HTML' });
     } catch (e) {
         console.error(e);
     }
