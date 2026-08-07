@@ -386,6 +386,8 @@ cron.schedule('0 8 * * *', async () => {
 });
 
 const app = express();
+const cors = require('cors');
+app.use(cors());
 app.use(express.json()); // Hỗ trợ đọc body dạng JSON
 
 app.get('/', (req, res) => {
