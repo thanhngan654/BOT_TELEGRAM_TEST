@@ -291,6 +291,12 @@ bot.onText(/\/ds/, async (msg) => {
         let restIndex = 1;
         
         for (const [restId, restData] of Object.entries(globalOrders)) {
+            // Fix crash if globalOrders contains old data structure
+            if (!restData || typeof restData.users === 'undefined') {
+                globalOrders = {};
+                saveOrders();
+                return bot.sendMessage(chatId, '🧹 Giỏ hàng cũ không tương thích đã được dọn dẹp! Vui lòng chọn món lại từ menu.');
+            }
             let restTotal = 0;
             text += `🏪 <b>[ID: ${restIndex}] ${restData.restName}</b>\n`;
             
@@ -325,6 +331,11 @@ bot.onText(/\/huy/, async (msg) => {
         let removedRestName = '';
         
         for (const restId in globalOrders) {
+            if (!globalOrders[restId] || typeof globalOrders[restId].users === 'undefined') {
+                globalOrders = {};
+                saveOrders();
+                return bot.sendMessage(chatId, '🧹 Giỏ hàng cũ không tương thích đã được dọn dẹp! Vui lòng chọn món lại từ menu.');
+            }
             if (globalOrders[restId].users[user] && globalOrders[restId].users[user].length > 0) {
                 removedItem = globalOrders[restId].users[user].pop();
                 removedRestName = globalOrders[restId].restName;
@@ -364,6 +375,11 @@ bot.onText(/\/chotdon(?:\s+(\d+)\s+(\d+))?/, async (msg, match) => {
         
         const restId = restIds[targetIndex - 1];
         const restData = globalOrders[restId];
+        if (!restData || typeof restData.users === 'undefined') {
+            globalOrders = {};
+            saveOrders();
+            return bot.sendMessage(chatId, '🧹 Giỏ hàng cũ không tương thích đã được dọn dẹp! Vui lòng chọn món lại từ menu.');
+        }
         
         let originalTotal = 0;
         let userTotals = {};
