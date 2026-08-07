@@ -222,23 +222,41 @@ bot.on('callback_query', async (query) => {
                 const inlineKeyboard = [];
                 for (let i = 0; i < menu.items.length; i += 2) {
                     const row = [];
-                    row.push({ text: menu.items[i].name, callback_data: `item_${restId}_${menu.items[i].id}` });
+                    
+                    // Tạo chữ cho nút: Tên món - Giá
+                    let btnText1 = menu.items[i].name;
+                    if (menu.items[i].price) btnText1 += ` - ${menu.items[i].price.toLocaleString()}đ`;
+                    row.push({ text: btnText1, callback_data: `i_${restId}_${menu.items[i].id}` });
+                    
                     if (menu.items[i+1]) {
-                        row.push({ text: menu.items[i+1].name, callback_data: `item_${restId}_${menu.items[i+1].id}` });
+                        let btnText2 = menu.items[i+1].name;
+                        if (menu.items[i+1].price) btnText2 += ` - ${menu.items[i+1].price.toLocaleString()}đ`;
+                        row.push({ text: btnText2, callback_data: `i_${restId}_${menu.items[i+1].id}` });
                     }
                     inlineKeyboard.push(row);
                 }
                 
-                await bot.editMessageText(`👇 Mời chọn món tại <b>${menu.name}</b>:`, {
-                    chat_id: chatId,
-                    message_id: query.message.message_id,
-                    parse_mode: 'HTML',
-                    reply_markup: {
-                        inline_keyboard: inlineKeyboard
-                    }
-                });
+                // Nếu có ảnh banner thì xóa tin nhắn cũ, gửi tin ảnh mới
+                if (menu.banner_image) {
+                    try { await bot.deleteMessage(chatId, query.message.message_id); } catch(e) {}
+                    await bot.sendPhoto(chatId, menu.banner_image, {
+                        caption: `👇 Mời chọn món tại <b>${menu.name}</b>:`,
+                        parse_mode: 'HTML',
+                        reply_markup: { inline_keyboard: inlineKeyboard }
+                    });
+                } else {
+                    // Nếu không có ảnh thì edit text như bình thường
+                    await bot.editMessageText(`👇 Mời chọn món tại <b>${menu.name}</b>:`, {
+                        chat_id: chatId,
+                        message_id: query.message.message_id,
+                        parse_mode: 'HTML',
+                        reply_markup: {
+                            inline_keyboard: inlineKeyboard
+                        }
+                    });
+                }
             }
-        } else if (data.startsWith('item_')) {
+        } else if (data.startsWith('i_')) {
             const parts = data.split('_');
             const restId = parts[1];
             const itemId = parts.slice(2).join('_');
@@ -368,8 +386,42 @@ cron.schedule('0 8 * * *', async () => {
 });
 
 const app = express();
+app.use(express.json()); // Hỗ trợ đọc body dạng JSON
+
 app.get('/', (req, res) => {
     res.send('Bot Tài Chính & Cơm Trưa đang hoạt động!');
+});
+
+// API Đẩy thực đơn từ Tool bên ngoài vào
+app.post('/api/menu', (req, res) => {
+    try {
+        const secretKey = req.body.secret_key;
+        if (secretKey !== 'sieubot123') {
+            return res.status(403).json({ error: 'Sai mật khẩu bảo mật' });
+        }
+        
+        const newMenu = req.body;
+        // Kiểm tra dữ liệu hợp lệ
+        if (!newMenu.id || !newMenu.name || !newMenu.items) {
+            return res.status(400).json({ error: 'Thiếu dữ liệu id, name, hoặc items' });
+        }
+        
+        // Cập nhật vào mảng menus trong RAM
+        const existingIndex = menus.findIndex(m => m.id === newMenu.id);
+        if (existingIndex !== -1) {
+            menus[existingIndex] = newMenu; // Cập nhật quán cũ
+        } else {
+            menus.push(newMenu); // Quán mới
+        }
+        
+        // Lưu ra ổ cứng
+        fs.writeFileSync(MENU_FILE, JSON.stringify(menus, null, 2));
+        
+        res.json({ success: true, message: `Đã cập nhật menu cho ${newMenu.name}` });
+    } catch (e) {
+        console.error('Lỗi API Menu:', e);
+        res.status(500).json({ error: 'Lỗi server nội bộ' });
+    }
 });
 
 const PORT = process.env.PORT || 3000;
