@@ -263,16 +263,60 @@ bot.on('callback_query', async (query) => {
             const menu = menus.find(m => m.id === restId);
             const item = menu?.items.find(i => i.id === itemId);
             
-            if (item) {
-                // Update in-memory storage
-                if (!globalOrders[user]) globalOrders[user] = [];
-                globalOrders[user].push(item.name);
-                // Save to file
+            if (item && menu) {
+                if (!globalOrders[restId]) globalOrders[restId] = { restName: menu.name, users: {} };
+                if (!globalOrders[restId].users[user]) globalOrders[restId].users[user] = [];
+                
+                globalOrders[restId].users[user].push({ name: item.name, price: item.price || 0 });
                 saveOrders();
                 
                 await bot.answerCallbackQuery(query.id, { text: `✅ Đã thêm: ${item.name}` });
-                await bot.sendMessage(chatId, `✅ @${user} vừa đặt: <b>${item.name}</b>`, { parse_mode: 'HTML' });
+                await bot.sendMessage(chatId, `✅ @${user} vừa đặt <b>${item.name}</b> tại quán <b>${menu.name}</b>`, { parse_mode: 'HTML' });
             }
+        } else if (data.startsWith('pay_')) {
+            const userOwe = data.replace('pay_', '');
+            const amount = debts[userOwe];
+            
+            if (!amount || amount <= 0) {
+                return bot.answerCallbackQuery(query.id, { text: `✅ @${userOwe} đã thanh toán xong rồi!`, show_alert: true });
+            }
+            
+            const bankId = 'MB'; // MB Bank
+            const accountNo = '03709868';
+            const accountName = encodeURIComponent('NGUYEN THANH NGAN');
+            const addInfo = encodeURIComponent(`${userOwe} thanh toan`);
+            const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${accountName}`;
+            
+            const inlineConfirm = [
+                [{ text: `✅ Admin Xác Nhận: @${userOwe} Đã Chuyển ${amount.toLocaleString()}đ`, callback_data: `confirm_${userOwe}` }]
+            ];
+            
+            await bot.sendPhoto(chatId, qrUrl, {
+                caption: `📸 Mã QR thanh toán tự động cho <b>@${userOwe}</b>\n💰 Số tiền nợ: <b>${amount.toLocaleString()}đ</b>`,
+                parse_mode: 'HTML',
+                reply_markup: { inline_keyboard: inlineConfirm }
+            });
+            await bot.answerCallbackQuery(query.id);
+            
+        } else if (data.startsWith('confirm_')) {
+            const userOwe = data.replace('confirm_', '');
+            
+            if (!debts[userOwe] || debts[userOwe] <= 0) {
+                return bot.answerCallbackQuery(query.id, { text: `⚠ Người này đã được xác nhận trước đó rồi!`, show_alert: true });
+            }
+            
+            debts[userOwe] = 0; // Xóa nợ
+            saveDebts();
+            
+            await bot.answerCallbackQuery(query.id, { text: `✅ Đã xác nhận thanh toán!` });
+            
+            // Xóa nút bấm xác nhận để tránh bấm 2 lần
+            await bot.editMessageCaption(`✅ <b>Admin đã xác nhận @${userOwe} thanh toán xong!</b>`, {
+                chat_id: chatId,
+                message_id: query.message.message_id,
+                parse_mode: 'HTML',
+                reply_markup: { inline_keyboard: [] }
+            });
         }
     } catch (e) {
         console.error('Callback query error:', e);
