@@ -220,8 +220,8 @@ bot.on('callback_query', async (query) => {
                     inlineKeyboard.push([{ text: btnText, callback_data: `i_${restId}_${item.id}` }]);
                 }
                 
-                // Tạo nội dung tin nhắn kèm link Grab
-                let textCaption = `👇 Mời chọn món tại <b>${menu.name}</b>:`;
+                const menuIndex = menus.findIndex(m => m.id === restId) + 1;
+                let textCaption = `👇 <b>[ID: ${menuIndex}]</b> Mời chọn món tại <b>${menu.name}</b>:`;
                 if (menu.url) {
                     textCaption += `\n🔗 <a href="${menu.url}">Xem ảnh/món ăn trên ứng dụng Grab</a>`;
                 }
@@ -332,7 +332,6 @@ bot.onText(/\/ds/, async (msg) => {
         }
         
         let text = '📋 <b>DANH SÁCH ĐẶT CƠM (CHƯA CHỐT)</b>\n\n';
-        let restIndex = 1;
         
         for (const [restId, restData] of Object.entries(globalOrders)) {
             // Fix crash if globalOrders contains old data structure
@@ -342,7 +341,8 @@ bot.onText(/\/ds/, async (msg) => {
                 return bot.sendMessage(chatId, '🧹 Giỏ hàng cũ không tương thích đã được dọn dẹp! Vui lòng chọn món lại từ menu.');
             }
             let restTotal = 0;
-            text += `🏪 <b>[ID: ${restIndex}] ${restData.restName}</b>\n`;
+            const menuIndex = menus.findIndex(m => m.id === restId) + 1;
+            text += `🏪 <b>[ID: ${menuIndex}] ${restData.restName}</b>\n`;
             
             for (const [user, items] of Object.entries(restData.users)) {
                 if (items.length > 0) {
@@ -356,8 +356,7 @@ bot.onText(/\/ds/, async (msg) => {
                 }
             }
             text += `👉 <b>Tổng gốc quán này: ${restTotal.toLocaleString()}đ</b>\n`;
-            text += `📝 <i>Chốt đơn quán này: /chotdon ${restIndex} [Tổng_Tiền_Đã_Giảm]</i>\n\n`;
-            restIndex++;
+            text += `📝 <i>Chốt đơn quán này: /chotdon ${menuIndex} [Tổng_Tiền_Đã_Giảm]</i>\n\n`;
         }
         
         await bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
@@ -412,17 +411,15 @@ bot.onText(/\/chotdon(?:\s+(\d+)\s+(\d+))?/, async (msg, match) => {
         const targetIndex = parseInt(match[1]);
         const finalPrice = parseInt(match[2]);
         
-        const restIds = Object.keys(globalOrders);
-        if (targetIndex < 1 || targetIndex > restIds.length) {
-            return bot.sendMessage(chatId, `⚠ Không tìm thấy ID quán là ${targetIndex}! Gõ /ds để xem.`);
+        const menu = menus[targetIndex - 1];
+        if (!menu) {
+            return bot.sendMessage(chatId, `⚠ Không tìm thấy ID quán là ${targetIndex}! Gõ /menu để xem danh sách ID hợp lệ.`);
         }
         
-        const restId = restIds[targetIndex - 1];
+        const restId = menu.id;
         const restData = globalOrders[restId];
         if (!restData || typeof restData.users === 'undefined') {
-            globalOrders = {};
-            saveOrders();
-            return bot.sendMessage(chatId, '🧹 Giỏ hàng cũ không tương thích đã được dọn dẹp! Vui lòng chọn món lại từ menu.');
+            return bot.sendMessage(chatId, `⚠ Quán này chưa có ai đặt món hoặc dữ liệu đã bị dọn dẹp.`);
         }
         
         let originalTotal = 0;
