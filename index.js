@@ -593,6 +593,61 @@ app.post('/api/menu', (req, res) => {
     }
 });
 
+// API Nhận biến động số dư từ SePay
+app.post('/api/sepay/webhook', async (req, res) => {
+    try {
+        // Bảo mật cơ bản (Tùy chọn)
+        if (req.query.token !== 'sieubot123') {
+            return res.status(403).json({ error: 'Unauthorized webhook token' });
+        }
+        
+        const tx = req.body;
+        // SePay thường truyền transferType là 'in' cho tiền vào
+        if (tx && tx.transferType === 'in') {
+            const amount = parseInt(tx.transferAmount);
+            const content = (tx.content || '').toString();
+            
+            // Xử lý nội dung chuyển khoản để khớp tên (loại bỏ khoảng trắng, ký tự đặc biệt, đưa về viết thường)
+            const normalizedContent = content.replace(/[^a-z0-9]/gi, '').toLowerCase();
+            
+            let foundUser = null;
+            for (const user of Object.keys(debts)) {
+                if (debts[user] > 0) {
+                    const normalizedUser = user.replace(/[^a-z0-9]/gi, '').toLowerCase();
+                    if (normalizedUser && normalizedContent.includes(normalizedUser)) {
+                        foundUser = user;
+                        break;
+                    }
+                }
+            }
+            
+            if (foundUser) {
+                // Xóa nợ
+                const debtAmount = debts[foundUser];
+                debts[foundUser] = 0;
+                saveDebts();
+                
+                // Gửi thông báo lên Telegram Group
+                const msg = `🎉 <b>TINH TINH! ĐÃ NHẬN TIỀN</b>\n\n`
+                          + `✅ Hệ thống tự động xác nhận đã nhận được <b>${amount.toLocaleString()}đ</b> qua MB Bank!\n`
+                          + `🆔 Khớp với nội dung: <i>"${content}"</i>\n`
+                          + `😎 Gạch nợ thành công cho: <b>@${foundUser}</b> (Nợ cũ: ${debtAmount.toLocaleString()}đ)`;
+                          
+                bot.sendMessage(TELEGRAM_CHAT_ID, msg, { parse_mode: 'HTML' }).catch(console.error);
+                
+                return res.json({ success: true, message: `Matched and cleared debt for ${foundUser}` });
+            }
+            
+            return res.json({ success: true, message: 'Transfer received but no matching debtor found' });
+        }
+        
+        res.json({ success: true, message: 'Ignored non-inward transfer' });
+    } catch (e) {
+        console.error('Lỗi API SePay:', e);
+        res.status(500).json({ error: 'Internal Server Error' });
+    }
+});
+
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`✅ Web server giả đang chạy trên port ${PORT}`);
