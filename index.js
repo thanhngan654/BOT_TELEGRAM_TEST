@@ -329,6 +329,14 @@ bot.onText(/\/chotdon/, async (msg) => {
     }
 });
 
+bot.onText(/\/id/, async (msg) => {
+    try {
+        await bot.sendMessage(msg.chat.id, `🆔 Chat ID của nhóm/đoạn chat này là: \`${msg.chat.id}\``, { parse_mode: 'Markdown' });
+    } catch (e) {
+        console.error(e);
+    }
+});
+
 // --- LỆNH KHỞI ĐỘNG CƠ BẢN ---
 bot.onText(/\/start/, async (msg) => {
     try {
