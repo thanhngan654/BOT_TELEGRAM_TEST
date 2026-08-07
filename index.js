@@ -220,20 +220,18 @@ bot.on('callback_query', async (query) => {
             
             if (menu) {
                 const inlineKeyboard = [];
-                for (let i = 0; i < menu.items.length; i += 2) {
-                    const row = [];
+                for (let i = 0; i < menu.items.length; i++) {
+                    const item = menu.items[i];
                     
-                    // Tạo chữ cho nút: Tên món - Giá
-                    let btnText1 = menu.items[i].name;
-                    if (menu.items[i].price) btnText1 += ` - ${menu.items[i].price.toLocaleString()}đ`;
-                    row.push({ text: btnText1, callback_data: `i_${restId}_${menu.items[i].id}` });
-                    
-                    if (menu.items[i+1]) {
-                        let btnText2 = menu.items[i+1].name;
-                        if (menu.items[i+1].price) btnText2 += ` - ${menu.items[i+1].price.toLocaleString()}đ`;
-                        row.push({ text: btnText2, callback_data: `i_${restId}_${menu.items[i+1].id}` });
+                    // Tạo chữ cho nút: [Giá] Tên món
+                    let btnText = item.name;
+                    if (item.price) {
+                        // Rút gọn giá: 25000 -> 25k
+                        const priceK = (item.price / 1000) + 'k';
+                        btnText = `[${priceK}] ${item.name}`;
                     }
-                    inlineKeyboard.push(row);
+                    
+                    inlineKeyboard.push([{ text: btnText, callback_data: `i_${restId}_${item.id}` }]);
                 }
                 
                 // Nếu có ảnh banner thì xóa tin nhắn cũ, gửi tin ảnh mới
