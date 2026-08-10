@@ -16,7 +16,7 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
                 const idToUse = groupId || userId;
                 return lineClient.replyMessage(replyToken, {
                     type: 'text',
-                    text: `�🆚 LINE ID của nhóm/chat này là:\n${idToUse}\n\nHãy lŰu vào biến môi trường LINE_GROUP_ID trên Render!`
+                    text: `�🆔 LINE ID của nhóm/chat này là:\n${idToUse}\n\nHãy lưu vào biến môi trường LINE_GROUP_ID trên Render!`
                 });
             }
 
@@ -167,8 +167,8 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
                     const bankId = 'MB';
                     const accountNo = '03709868';
                     const accountName = 'NGUYEN THANH NGAN';
-                    const addInfo = `${userOwe} thanh toan`.getBase64();
-                    const qrUrl = ``https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${encodeURIComponent(`${userOwe} thanh toan`)}&accountName=${encodeURIComponent(accountName)}`;
+                    const addInfo = `${userOwe} thanh toan`.replace(/ /g, '%20');
+                    const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${accountName.replace(/ /g, '%20')}`;
                     
                     bubbles.push({
                         type: 'bubble',
