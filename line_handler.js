@@ -1,5 +1,5 @@
 module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, saveDebts, footballEvent, saveFootball) {
-    const ADMIN_USERNAMES = (process.env.ADMIN_USERNAMES || 'thanhngan654,ngân nguyễn,ngan nguyen,160817-ngân nguyễn').split(',').map(s => s.trim().toLowerCase());
+    const ADMIN_USERNAMES = (process.env.ADMIN_USERNAMES || 'thanhngan654,ngân nguyễn,ngan nguyen,160817-ngân nguyễn,177441_liêm').split(',').map(s => s.trim().toLowerCase());
     function isAdmin(user) {
         return ADMIN_USERNAMES.includes(user.toLowerCase());
     }
