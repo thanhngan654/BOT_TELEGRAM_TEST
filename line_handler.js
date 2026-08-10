@@ -39,95 +39,124 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
             }
 
             
+
             if (text === '/diemdanh') {
-                if (footballEvent.isLocked) {
-                    return lineClient.replyMessage(replyToken, { type: 'text', text: '⚠ Trận bóng đã chốt, không thể điểm danh thêm!' });
-                }
-                footballEvent.isActive = true;
-                saveFootball();
-                
-                const flexMessage = {
-                    type: 'flex',
-                    altText: 'Điểm danh đá banh',
-                    contents: {
-                        type: 'bubble',
-                        hero: {
-                            type: 'image',
-                            url: 'https://artlive.vn/wp-content/uploads/2024/03/image-116.png',
-                            size: 'full',
-                            aspectRatio: '20:13',
-                            aspectMode: 'cover'
-                        },
-                        body: {
-                            type: 'box',
-                            layout: 'vertical',
-                            contents: [
-                                { type: 'text', text: '⚽ ĐIỂM DANH ĐÁ BANH', weight: 'bold', size: 'xl' },
-                                { type: 'text', text: 'Anh em bấm nút bên dưới để báo cáo quân số nhé!', wrap: true }
-                            ]
-                        },
-                        footer: {
-                            type: 'box',
-                            layout: 'horizontal',
-                            spacing: 'sm',
-                            contents: [
-                                { type: 'button', style: 'primary', action: { type: 'postback', label: '+1 người', data: 'fb_add' } },
-                                { type: 'button', style: 'secondary', action: { type: 'postback', label: 'Cancel', data: 'fb_cancel' } }
-                            ]
+                try {
+                    const db = require('./db');
+                    let match = await db.getActiveMatch();
+                    if (!match) match = await db.createMatch();
+                    const matchId = match.id;
+                    const flexMessage = {
+                        type: 'flex',
+                        altText: 'Điểm danh đá banh Trận #' + matchId,
+                        contents: {
+                            type: 'bubble',
+                            hero: {
+                                type: 'image',
+                                url: 'https://artlive.vn/wp-content/uploads/2024/03/image-116.png',
+                                size: 'full',
+                                aspectRatio: '20:13',
+                                aspectMode: 'cover'
+                            },
+                            body: {
+                                type: 'box',
+                                layout: 'vertical',
+                                contents: [
+                                    { type: 'text', text: '⚽ ĐIỂM DANH ĐÁ BANH', weight: 'bold', size: 'xl' },
+                                    { type: 'text', text: 'Trận #' + matchId + ' - Bấm nút để điểm danh!', wrap: true }
+                                ]
+                            },
+                            footer: {
+                                type: 'box',
+                                layout: 'horizontal',
+                                spacing: 'sm',
+                                contents: [
+                                    { type: 'button', style: 'primary', action: { type: 'postback', label: '+1 người', data: 'fb_add_' + matchId } },
+                                    { type: 'button', style: 'secondary', action: { type: 'postback', label: 'Cancel', data: 'fb_cancel_' + matchId } }
+                                ]
+                            }
                         }
-                    }
-                };
-                return lineClient.replyMessage(replyToken, flexMessage);
+                    };
+                    return lineClient.replyMessage(replyToken, flexMessage);
+                } catch(e) { console.error(e); return lineClient.replyMessage(replyToken, { type: 'text', text: 'Lỗi khi tạo trận.' }); }
             }
             
             if (text === '/dsbanh') {
-                if (!footballEvent.isActive) return lineClient.replyMessage(replyToken, { type: 'text', text: 'Chưa có trận bóng nào đang mở.' });
-                
-                let msgText = '⚽ DANH SÁCH ĐIỂM DANH BÓNG ĐÁ:\n\n';
-                let totalSlots = 0;
-                for (const [user, slots] of Object.entries(footballEvent.users)) {
-                    msgText += `- ${user}: ${slots} người\n`;
-                    totalSlots += slots;
-                }
-                
-                if (totalSlots === 0) msgText += 'Chưa có ai điểm danh.\n';
-                else msgText += `\n=> Tổng cộng: ${totalSlots} người (Dự kiến ${(totalSlots * 40).toLocaleString()}k)`;
-                if (footballEvent.isLocked) msgText += '\n🔒 TRẬN ĐÃ CHỐT!';
-                
-                return lineClient.replyMessage(replyToken, { type: 'text', text: msgText });
+                try {
+                    const db = require('./db');
+                    const match = await db.getActiveMatch();
+                    if (!match) return lineClient.replyMessage(replyToken, { type: 'text', text: 'Chưa có trận bóng nào đang mở. Gõ /diemdanh để tạo trận mới.' });
+                    const users = await db.getMatchUsers(match.id);
+                    let msgText = '⚽ DANH SÁCH ĐIỂM DANH [Trận #' + match.id + ']:\nTrạng thái: ' + match.status + '\n\n';
+                    let total = 0;
+                    for (const row of users) { msgText += '- ' + row.username + ': ' + row.slots + ' người\n'; total += row.slots; }
+                    if (users.length === 0) msgText += 'Chưa có ai điểm danh.\n';
+                    else msgText += '\n=> Tổng: ' + total + ' người (Dự kiến ' + total * 40 + 'k)';
+                    return lineClient.replyMessage(replyToken, { type: 'text', text: msgText });
+                } catch(e) { return lineClient.replyMessage(replyToken, { type: 'text', text: 'Lỗi khi tải dữ liệu.' }); }
             }
             
-            if (text === '/huykeo') {
+            const huykeoMatch = text.match(/^\/huykeo(\s*(\d+))?$/);
+            if (huykeoMatch) {
                 if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Bạn không có quyền Hủy kèo.' });
-                
-                footballEvent.isActive = false;
-                footballEvent.isLocked = false;
-                footballEvent.users = {};
-                saveFootball();
-                return lineClient.replyMessage(replyToken, { type: 'text', text: '🗑 Trận bóng đã bị hủy. Đã reset danh sách.' });
+                try {
+                    const db = require('./db');
+                    const idArg = (huykeoMatch[2] || '').trim();
+                    let footballMatch = idArg ? await db.getMatchById(parseInt(idArg)) : await db.getActiveMatch();
+                    if (!footballMatch) return lineClient.replyMessage(replyToken, { type: 'text', text: 'Không tìm thấy trận nào để hủy.' });
+                    await db.updateMatchStatus(footballMatch.id, 'CANCELLED');
+                    return lineClient.replyMessage(replyToken, { type: 'text', text: '🗑 Trận bóng #' + footballMatch.id + ' đã bị hủy kèo. Không ghi nợ.' });
+                } catch(e) { return lineClient.replyMessage(replyToken, { type: 'text', text: 'Lỗi khi hủy kèo.' }); }
             }
             
-            if (text === '/chotsan') {
+            const chotSanMatch = text.match(/^\/chotsan(\s*(\d+))?$/);
+            if (chotSanMatch) {
                 if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Bạn không có quyền Chốt sân.' });
-                
-                if (!footballEvent.isActive) {
-                    return lineClient.replyMessage(replyToken, { type: 'text', text: 'Không có trận nào đang mở để chốt!' });
-                }
-                
-                footballEvent.isLocked = true;
-                let totalSlots = 0;
-                for (const [u, slots] of Object.entries(footballEvent.users)) {
-                    if (!debts[u]) debts[u] = 0;
-                    debts[u] += slots * 40000;
-                    totalSlots += slots;
-                }
-                saveFootball();
-                saveDebts();
-                
-                return lineClient.replyMessage(replyToken, { type: 'text', text: `✅ ĐÃ CHỐT SÂN!\nTổng cộng ${totalSlots} người đã được cộng công nợ (40k/người) vào sổ.\nSử dụng /tienno để xem tổng nợ.` });
+                try {
+                    const db = require('./db');
+                    const idArg = (chotSanMatch[2] || '').trim();
+                    let footballMatch = idArg ? await db.getMatchById(parseInt(idArg)) : await db.getActiveMatch();
+                    if (!footballMatch) return lineClient.replyMessage(replyToken, { type: 'text', text: 'Không có trận nào đang mở để chốt!' });
+                    if (footballMatch.status !== 'OPEN') return lineClient.replyMessage(replyToken, { type: 'text', text: 'Trận #' + footballMatch.id + ' đã ở trạng thái ' + footballMatch.status + '.' });
+                    const users = await db.getMatchUsers(footballMatch.id);
+                    if (users.length === 0) return lineClient.replyMessage(replyToken, { type: 'text', text: 'Trận này chưa có ai điểm danh!' });
+                    const freshDebts = await db.getDebts();
+                    let replyMsg = '✅ ĐÃ CHỐT SÂN [Trận #' + footballMatch.id + ']!\n\n';
+                    let total = 0;
+                    for (const row of users) {
+                        freshDebts[row.username] = (freshDebts[row.username] || 0) + (row.slots * 40000);
+                        debts[row.username] = freshDebts[row.username];
+                        replyMsg += '⚽ ' + row.username + ': +' + row.slots + ' người (+' + (row.slots * 40000) + 'đ)\n';
+                        total += row.slots;
+                    }
+                    await db.saveDebts(freshDebts);
+                    await db.updateMatchStatus(footballMatch.id, 'CLOSED');
+                    replyMsg += '\n=> Tổng: ' + total + ' người. Dùng /tienno để xem nợ.';
+                    return lineClient.replyMessage(replyToken, { type: 'text', text: replyMsg });
+                } catch(e) { console.error(e); return lineClient.replyMessage(replyToken, { type: 'text', text: 'Lỗi khi chốt sân.' }); }
             }
             
-            
+            const diemdanhMuonMatch = text.match(/^\/diemdanhmuon (\d+) (.+) (\d+)$/);
+            if (diemdanhMuonMatch) {
+                if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Chỉ Admin mới được dùng lệnh này.' });
+                const matchId = parseInt(diemdanhMuonMatch[1]);
+                const targetUser = diemdanhMuonMatch[2].trim();
+                const slots = parseInt(diemdanhMuonMatch[3]);
+                try {
+                    const db = require('./db');
+                    const footballMatch = await db.getMatchById(matchId);
+                    if (!footballMatch) return lineClient.replyMessage(replyToken, { type: 'text', text: 'Không tìm thấy trận #' + matchId + '.' });
+                    if (footballMatch.status === 'CANCELLED') return lineClient.replyMessage(replyToken, { type: 'text', text: 'Trận #' + matchId + ' đã bị hủy.' });
+                    await db.addMatchUser(matchId, targetUser, slots);
+                    const freshDebts = await db.getDebts();
+                    const addedAmount = slots * 40000;
+                    freshDebts[targetUser] = (freshDebts[targetUser] || 0) + addedAmount;
+                    debts[targetUser] = freshDebts[targetUser];
+                    await db.saveDebts(freshDebts);
+                    return lineClient.replyMessage(replyToken, { type: 'text', text: '✅ Đã điểm danh muộn cho ' + targetUser + ' vào Trận #' + matchId + ': +' + slots + ' người (+' + addedAmount.toLocaleString() + 'đ)\nNợ hiện tại: ' + freshDebts[targetUser].toLocaleString() + 'đ' });
+                } catch(e) { return lineClient.replyMessage(replyToken, { type: 'text', text: 'Lỗi khi điểm danh muộn.' }); }
+            }
+
             if (text === '/helpmebanh') {
                 const helpText = `⚽ DANH SÁCH LỆNH BÓNG ĐÁ:\n/diemdanh - Mở form điểm danh\n/dsbanh - Xem danh sách điểm danh\n/tienno - Xem ai nợ bao nhiêu tiền\n/thanhtoan - Lấy QR code thanh toán\n/huykeo (Admin) - Hủy trận bóng\n/chotsan (Admin) - Chốt bóng đá và cộng nợ\n/xacnhan Tên SốTiền (Admin) - Trừ nợ thủ công`;
                 return lineClient.replyMessage(replyToken, { type: 'text', text: helpText });

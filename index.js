@@ -25,7 +25,6 @@ const db = require('./db');
 let menus = [];
 let globalOrders = {}; // Dữ liệu mới: { restId: { restName: 'A', users: { username: [ {name, price} ] } } }
 let debts = {};
-let footballEvent = { isActive: false, isLocked: false, users: {} };
 
 async function startup() {
     await db.initDB();
@@ -43,42 +42,11 @@ async function startup() {
     if (Object.keys(debts).length === 0 && fs.existsSync(DEBTS_FILE)) {
         try { debts = JSON.parse(fs.readFileSync(DEBTS_FILE, 'utf8')); db.saveDebts(debts); } catch(e){}
     }
-    
-    // Load Football State
-    try {
-        const stateRes = await db.query('SELECT * FROM football_state WHERE id = 1');
-        if (stateRes.rows.length > 0) {
-            footballEvent.isActive = stateRes.rows[0].is_active;
-            footballEvent.isLocked = stateRes.rows[0].is_locked;
-        }
-        const attRes = await db.query('SELECT * FROM football_attendance');
-        for (const row of attRes.rows) {
-            footballEvent.users[row.username] = row.slots;
-        }
-    } catch(e) { console.error('Lỗi load football state', e); }
 }
 startup();
 
 function saveOrders() { db.setKV('globalOrders', globalOrders); }
 function saveDebts() { db.saveDebts(debts); }
-
-async function saveFootball() {
-    if (!process.env.DATABASE_URL) return;
-    try {
-        await db.query('UPDATE football_state SET is_active = $1, is_locked = $2 WHERE id = 1', [footballEvent.isActive, footballEvent.isLocked]);
-        await db.query('BEGIN');
-        await db.query('DELETE FROM football_attendance');
-        for (const [user, slots] of Object.entries(footballEvent.users)) {
-            await db.query('INSERT INTO football_attendance (username, slots) VALUES ($1, $2)', [user, slots]);
-        }
-        await db.query('COMMIT');
-    } catch(e) {
-        await db.query('ROLLBACK');
-        console.error(e);
-    }
-}
-
-
 
 // --- XỬ LÝ LỆNH MENU GỌI MÓN ---
 bot.onText(/\/menu/, async (msg) => {
@@ -104,27 +72,32 @@ bot.onText(/\/menu/, async (msg) => {
 });
 
 bot.on('callback_query', async (query) => {
-        // Football handling
-        if (data === 'fb_add' || data === 'fb_cancel') {
-            if (footballEvent.isLocked) {
-                return bot.answerCallbackQuery(query.id, { text: 'Trận bóng đã chốt!', show_alert: true });
-            }
-            if (data === 'fb_add') {
-                footballEvent.users[user] = (footballEvent.users[user] || 0) + 1;
-                saveFootball();
-                return bot.answerCallbackQuery(query.id, { text: `Đã ghi nhận +1 cho ${user}` });
-            }
-            if (data === 'fb_cancel') {
-                delete footballEvent.users[user];
-                saveFootball();
-                return bot.answerCallbackQuery(query.id, { text: `Đã hủy điểm danh của ${user}` });
-            }
-        }
-
     try {
         const chatId = query.message.chat.id;
         const data = query.data;
         const user = query.from.username || query.from.first_name || 'Khách';
+
+        // Football handling with match ID
+        if (data.startsWith('fb_add_') || data.startsWith('fb_cancel_')) {
+            const parts = data.split('_');
+            const matchId = parseInt(parts[parts.length - 1]);
+            const isAdd = data.startsWith('fb_add_');
+            try {
+                const footballMatch = await db.getMatchById(matchId);
+                if (!footballMatch) return bot.answerCallbackQuery(query.id, { text: 'Trận này không tồn tại!', show_alert: true });
+                if (footballMatch.status !== 'OPEN') return bot.answerCallbackQuery(query.id, { text: `Trận #${matchId} đã ${footballMatch.status === 'CLOSED' ? 'chốt' : 'bị hủy'}. Không thể thay đổi!`, show_alert: true });
+                if (isAdd) {
+                    await db.addMatchUser(matchId, user, 1);
+                    return bot.answerCallbackQuery(query.id, { text: `✅ Đã ghi nhận +1 cho ${user} [Trận #${matchId}]` });
+                } else {
+                    await db.removeMatchUser(matchId, user);
+                    return bot.answerCallbackQuery(query.id, { text: `🗑 Đã hủy điểm danh của ${user} [Trận #${matchId}]` });
+                }
+            } catch(e) {
+                console.error(e);
+                return bot.answerCallbackQuery(query.id, { text: 'Có lỗi xảy ra!', show_alert: true });
+            }
+        }
 
         if (data.startsWith('rest_')) {
             const restId = data.replace('rest_', '');
@@ -614,7 +587,7 @@ app.listen(PORT, () => {
     console.log('✅ Bot Telegram đã khởi động và đang online!');
 });
 
-// --- XỬ LÝ ĐIỂM DANH BÓNG ĐÁ ---
+// --- XỬ LÝ ĐIỂM DANH BÓNG ĐÁ (Master-Detail) ---
 const ADMIN_USERNAMES = (process.env.ADMIN_USERNAMES || 'thanhngan654,ngân nguyễn,ngan nguyen,160817-ngân nguyễn,177441_liêm').split(',').map(s => s.trim().toLowerCase());
 function isAdmin(user) {
     return ADMIN_USERNAMES.includes(user.toLowerCase());
@@ -622,76 +595,98 @@ function isAdmin(user) {
 
 bot.onText(/\/diemdanh/, async (msg) => {
     const chatId = msg.chat.id;
-    if (footballEvent.isLocked) {
-        return bot.sendMessage(chatId, '⚠ Trận bóng đã chốt, không thể điểm danh thêm!');
-    }
-    footballEvent.isActive = true;
-    saveFootball();
-
-    const inlineKeyboard = [
-        [{ text: '+1 người', callback_data: 'fb_add' }, { text: 'Cancel', callback_data: 'fb_cancel' }]
-    ];
-
     try {
+        let match = await db.getActiveMatch();
+        if (!match) {
+            match = await db.createMatch();
+        }
+        const matchId = match.id;
+        const inlineKeyboard = [
+            [{ text: '+1 người', callback_data: `fb_add_${matchId}` }, { text: 'Cancel', callback_data: `fb_cancel_${matchId}` }]
+        ];
         await bot.sendPhoto(chatId, 'https://artlive.vn/wp-content/uploads/2024/03/image-116.png', {
-            caption: '⚽ <b>ĐIỂM DANH ĐÁ BANH</b>\nAnh em bấm nút bên dưới để báo cáo quân số nhé!',
+            caption: `⚽ <b>ĐIỂM DANH ĐÁ BANH</b> [Trận #${matchId}]\nAnh em bấm nút bên dưới để báo cáo quân số nhé!`,
             parse_mode: 'HTML',
             reply_markup: { inline_keyboard: inlineKeyboard }
         });
     } catch(e) { console.error(e); }
 });
 
-bot.onText(/\/dsbanh/, (msg) => {
+bot.onText(/\/dsbanh/, async (msg) => {
     const chatId = msg.chat.id;
-    if (!footballEvent.isActive) return bot.sendMessage(chatId, 'Chưa có trận bóng nào đang mở.');
-    
-    let msgText = '⚽ <b>DANH SÁCH ĐIỂM DANH BÓNG ĐÁ:</b>\n\n';
-    let totalSlots = 0;
-    for (const [user, slots] of Object.entries(footballEvent.users)) {
-        msgText += `- ${user}: ${slots} người\n`;
-        totalSlots += slots;
-    }
-    
-    if (totalSlots === 0) msgText += 'Chưa có ai điểm danh.\n';
-    else {
-        msgText += `\n=> Tổng cộng: ${totalSlots} người (Dự kiến ${(totalSlots * 40).toLocaleString()}k)`;
-    }
-    if (footballEvent.isLocked) msgText += '\n🔒 TRẬN ĐÃ CHỐT!';
-    
-    bot.sendMessage(chatId, msgText, { parse_mode: 'HTML' });
+    try {
+        const match = await db.getActiveMatch();
+        if (!match) return bot.sendMessage(chatId, 'Chưa có trận bóng nào đang mở. Gõ /diemdanh để tạo trận mới.');
+        const users = await db.getMatchUsers(match.id);
+        let msgText = `⚽ <b>DANH SÁCH ĐIỂM DANH [Trận #${match.id}]:</b>\n<i>Trạng thái: ${match.status}</i>\n\n`;
+        let total = 0;
+        for (const row of users) { msgText += `- ${row.username}: ${row.slots} người\n`; total += row.slots; }
+        if (users.length === 0) msgText += 'Chưa có ai điểm danh.\n';
+        else msgText += `\n=> Tổng: ${total} người (Dự kiến ${total * 40}k)`;
+        bot.sendMessage(chatId, msgText, { parse_mode: 'HTML' });
+    } catch(e) { console.error(e); bot.sendMessage(chatId, 'Lỗi khi tải dữ liệu.'); }
 });
 
-bot.onText(/\/huykeo/, (msg) => {
+bot.onText(/\/huykeo(.*)/, async (msg, matchArr) => {
+    const chatId = msg.chat.id;
     const user = msg.from.username || msg.from.first_name || 'Khách';
-    if (!isAdmin(user)) return bot.sendMessage(msg.chat.id, '❌ Bạn không có quyền Hủy kèo.');
-    
-    footballEvent = { isActive: false, isLocked: false, users: {} };
-    saveFootball();
-    bot.sendMessage(msg.chat.id, '🗑 Trận bóng đã bị hủy. Đã reset danh sách.');
+    if (!isAdmin(user)) return bot.sendMessage(chatId, '❌ Bạn không có quyền Hủy kèo.');
+    try {
+        const idArg = (matchArr[1] || '').trim();
+        let footballMatch = idArg ? await db.getMatchById(parseInt(idArg)) : await db.getActiveMatch();
+        if (!footballMatch) return bot.sendMessage(chatId, 'Không tìm thấy trận nào để hủy.');
+        await db.updateMatchStatus(footballMatch.id, 'CANCELLED');
+        bot.sendMessage(chatId, `🗑 Trận bóng #${footballMatch.id} đã bị hủy kèo. Không ghi nợ.`);
+    } catch(e) { console.error(e); bot.sendMessage(chatId, 'Lỗi khi hủy kèo.'); }
 });
 
-bot.onText(/\/chotsan/, (msg) => {
+bot.onText(/\/chotsan(.*)/, async (msg, matchArr) => {
+    const chatId = msg.chat.id;
     const user = msg.from.username || msg.from.first_name || 'Khách';
-    if (!isAdmin(user)) return bot.sendMessage(msg.chat.id, '❌ Bạn không có quyền Chốt sân.');
-    
-    if (!footballEvent.isActive) {
-        return bot.sendMessage(msg.chat.id, 'Không có trận nào đang mở để chốt!');
-    }
-    
-    footballEvent.isLocked = true;
-    let totalSlots = 0;
-    for (const [u, slots] of Object.entries(footballEvent.users)) {
-        if (!debts[u]) debts[u] = 0;
-        debts[u] += slots * 40000;
-        totalSlots += slots;
-    }
-    
-    saveFootball();
-    saveDebts();
-    
-    bot.sendMessage(msg.chat.id, `✅ <b>ĐÃ CHỐT SÂN!</b>\nTổng cộng ${totalSlots} người đã được cộng công nợ (40k/người) vào sổ.\nSử dụng /tienno để xem tổng nợ.`, { parse_mode: 'HTML' });
+    if (!isAdmin(user)) return bot.sendMessage(chatId, '❌ Bạn không có quyền Chốt sân.');
+    try {
+        const idArg = (matchArr[1] || '').trim();
+        let footballMatch = idArg ? await db.getMatchById(parseInt(idArg)) : await db.getActiveMatch();
+        if (!footballMatch) return bot.sendMessage(chatId, 'Không có trận nào đang mở để chốt!');
+        if (footballMatch.status !== 'OPEN') return bot.sendMessage(chatId, `Trận #${footballMatch.id} đã ở trạng thái ${footballMatch.status}.`);
+        const users = await db.getMatchUsers(footballMatch.id);
+        if (users.length === 0) return bot.sendMessage(chatId, 'Trận này chưa có ai điểm danh!');
+        const freshDebts = await db.getDebts();
+        let replyMsg = `✅ <b>ĐÃ CHỐT SÂN [Trận #${footballMatch.id}]!</b>\n\n`;
+        let total = 0;
+        for (const row of users) {
+            freshDebts[row.username] = (freshDebts[row.username] || 0) + (row.slots * 40000);
+            debts[row.username] = freshDebts[row.username];
+            replyMsg += `⚽ ${row.username}: +${row.slots} người (+${row.slots * 40000}đ)\n`;
+            total += row.slots;
+        }
+        await db.saveDebts(freshDebts);
+        await db.updateMatchStatus(footballMatch.id, 'CLOSED');
+        replyMsg += `\n=> Tổng: ${total} người. Dùng /tienno để xem nợ.`;
+        bot.sendMessage(chatId, replyMsg, { parse_mode: 'HTML' });
+    } catch(e) { console.error(e); bot.sendMessage(chatId, 'Lỗi khi chốt sân.'); }
 });
 
+bot.onText(/\/diemdanhmuon (\d+) (.+) (\d+)/, async (msg, matchArr) => {
+    const chatId = msg.chat.id;
+    const user = msg.from.username || msg.from.first_name || 'Khách';
+    if (!isAdmin(user)) return bot.sendMessage(chatId, '❌ Chỉ Admin mới được dùng lệnh này.');
+    const matchId = parseInt(matchArr[1]);
+    const targetUser = matchArr[2].trim();
+    const slots = parseInt(matchArr[3]);
+    try {
+        const footballMatch = await db.getMatchById(matchId);
+        if (!footballMatch) return bot.sendMessage(chatId, `Không tìm thấy trận #${matchId}.`);
+        if (footballMatch.status === 'CANCELLED') return bot.sendMessage(chatId, `Trận #${matchId} đã bị hủy.`);
+        await db.addMatchUser(matchId, targetUser, slots);
+        const freshDebts = await db.getDebts();
+        const addedAmount = slots * 40000;
+        freshDebts[targetUser] = (freshDebts[targetUser] || 0) + addedAmount;
+        debts[targetUser] = freshDebts[targetUser];
+        await db.saveDebts(freshDebts);
+        bot.sendMessage(chatId, `✅ Đã điểm danh muộn cho <b>${targetUser}</b> vào Trận #${matchId}: +${slots} người (+${addedAmount.toLocaleString()}đ)\nNợ hiện tại: ${freshDebts[targetUser].toLocaleString()}đ`, { parse_mode: 'HTML' });
+    } catch(e) { console.error(e); bot.sendMessage(chatId, 'Lỗi khi điểm danh muộn.'); }
+});
 
 bot.onText(/\/helpmebanh/, (msg) => {
     const text = `⚽ <b>DANH SÁCH LỆNH BÓNG ĐÁ:</b>
@@ -699,11 +694,13 @@ bot.onText(/\/helpmebanh/, (msg) => {
 /dsbanh - Xem danh sách điểm danh
 /tienno - Xem ai nợ bao nhiêu tiền
 /thanhtoan - Lấy QR code thanh toán
-/huykeo (Admin) - Hủy trận bóng
-/chotsan (Admin) - Chốt bóng đá và cộng nợ
+/huykeo [id] (Admin) - Hủy trận bóng
+/chotsan [id] (Admin) - Chốt bóng đá và cộng nợ
+/diemdanhmuon &lt;id&gt; &lt;tên&gt; &lt;slot&gt; (Admin) - Điểm danh muộn
 /xacnhan Tên SốTiền (Admin) - Trừ nợ thủ công`;
     bot.sendMessage(msg.chat.id, text, { parse_mode: 'HTML' });
 });
+
 bot.onText(/\/helpme/, (msg) => {
     const text = `📚 <b>DANH SÁCH CÚ PHÁP:</b>
 /menu - Xem menu gọi món
@@ -713,13 +710,13 @@ bot.onText(/\/helpme/, (msg) => {
 /dsbanh - Xem danh sách bóng đá
 /tienno - Xem ai nợ bao nhiêu tiền
 /thanhtoan - Lấy QR code thanh toán nợ
-/huykeo (Admin) - Hủy trận bóng
-/chotsan (Admin) - Chốt bóng đá và cộng nợ
+/huykeo [id] (Admin) - Hủy trận bóng
+/chotsan [id] (Admin) - Chốt bóng đá và cộng nợ
 /chotdon (Admin) - Chốt đơn cơm và cộng nợ
+/diemdanhmuon &lt;id&gt; &lt;tên&gt; &lt;slot&gt; (Admin) - Điểm danh muộn
 /xacnhan Tên SốTiền (Admin) - Trừ nợ thủ công`;
     bot.sendMessage(msg.chat.id, text, { parse_mode: 'HTML' });
 });
-
 
 bot.onText(/\/member/, (msg) => {
     const users = Object.keys(debts);
@@ -735,7 +732,6 @@ bot.onText(/\/tienno/, (msg) => {
     let text = '💰 <b>DANH SÁCH CÔNG NỢ:</b>\n\n';
     let total = 0;
     let hasDebt = false;
-    
     for (const user in debts) {
         if (debts[user] > 0) {
             text += `👩🏻 ${user}: ${debts[user].toLocaleString()}đ\n`;
@@ -743,10 +739,8 @@ bot.onText(/\/tienno/, (msg) => {
             hasDebt = true;
         }
     }
-    
     if (!hasDebt) text = '🎉 Tuyệt vời! Hiện tại không có ai nợ tiền.';
     else text += `\n=> <b>TỔNG NỢ: ${total.toLocaleString()}đ</b>\n👉 Gõ /thanhtoan để lấy mã QR thanh toán.`;
-    
     bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
 });
 
@@ -754,38 +748,26 @@ bot.onText(/\/thanhtoan/, (msg) => {
     const chatId = msg.chat.id;
     const userName = msg.from.username || msg.from.first_name || 'Khách';
     const amount = debts[userName] || 0;
-    
-    if (amount <= 0) {
-        return bot.sendMessage(chatId, `${userName} ơi, bạn không có nợ gì cả. Tuyệt vời! 🥳`);
-    }
-    
-    // Tương tự lệnh /rc cũ
+    if (amount <= 0) return bot.sendMessage(chatId, `${userName} ơi, bạn không có nợ gì cả. Tuyệt vời! 🥳`);
     const bankId = 'MB';
     const accountNo = '03709868';
     const accountName = 'NGUYEN THANH NGAN';
     const addInfo = encodeURIComponent(`${userName} thanh toan`);
-    
     const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${encodeURIComponent(accountName)}`;
-    
     bot.sendPhoto(chatId, qrUrl, {
         caption: `💳 ${userName} đang nợ <b>${amount.toLocaleString()}đ</b>.\nQuét mã QR bên trên để thanh toán.\nNội dung CK: ${userName} thanh toan`,
         parse_mode: 'HTML'
     });
 });
 
-bot.onText(/\/xacnhan (.+) (\d+)/, (msg, match) => {
+bot.onText(/\/xacnhan (.+) (\d+)/, (msg, matchArr) => {
     const user = msg.from.username || msg.from.first_name || 'Khách';
     if (!isAdmin(user)) return bot.sendMessage(msg.chat.id, '❌ Chỉ Admin mới được dùng lệnh này.');
-    
-    const targetUser = match[1].trim();
-    const amount = parseInt(match[2], 10);
-    
-    if (!debts[targetUser]) {
-        return bot.sendMessage(msg.chat.id, `Không tìm thấy nợ của ${targetUser}.`);
-    }
-    
+    const targetUser = matchArr[1].trim();
+    const amount = parseInt(matchArr[2], 10);
+    if (!debts[targetUser]) return bot.sendMessage(msg.chat.id, `Không tìm thấy nợ của ${targetUser}.`);
     debts[targetUser] = Math.max(0, debts[targetUser] - amount);
     saveDebts();
-    
     bot.sendMessage(msg.chat.id, `✅ Đã trừ ${amount.toLocaleString()}đ cho ${targetUser}. Nợ còn lại: ${debts[targetUser].toLocaleString()}đ.`);
 });
+

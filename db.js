@@ -28,24 +28,20 @@ async function initDB() {
                 username VARCHAR(255) PRIMARY KEY,
                 amount INTEGER NOT NULL DEFAULT 0
             );
-            
-            CREATE TABLE IF NOT EXISTS football_state (
-                id INTEGER PRIMARY KEY DEFAULT 1,
-                is_active BOOLEAN NOT NULL DEFAULT false,
-                is_locked BOOLEAN NOT NULL DEFAULT false
+
+            CREATE TABLE IF NOT EXISTS football_matches (
+                id SERIAL PRIMARY KEY,
+                status VARCHAR(20) NOT NULL DEFAULT 'OPEN',
+                created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             );
-            
-            CREATE TABLE IF NOT EXISTS football_attendance (
-                username VARCHAR(255) PRIMARY KEY,
-                slots INTEGER NOT NULL DEFAULT 1
+
+            CREATE TABLE IF NOT EXISTS football_match_details (
+                id SERIAL PRIMARY KEY,
+                match_id INTEGER NOT NULL REFERENCES football_matches(id) ON DELETE CASCADE,
+                username VARCHAR(255) NOT NULL,
+                slots INTEGER NOT NULL DEFAULT 1,
+                UNIQUE(match_id, username)
             );
-        `);
-        
-        // Init football state row if not exists
-        await client.query(`
-            INSERT INTO football_state (id, is_active, is_locked) 
-            VALUES (1, false, false) 
-            ON CONFLICT (id) DO NOTHING;
         `);
         console.log('✅ Đã khởi tạo Database PostgreSQL thành công!');
     } catch (err) {
@@ -99,7 +95,7 @@ async function saveDebts(debts) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        await client.query('DELETE FROM debts'); // Clear old debts, or we can just update
+        await client.query('DELETE FROM debts');
         for (const [user, amount] of Object.entries(debts)) {
             if (amount > 0) {
                 await client.query('INSERT INTO debts (username, amount) VALUES ($1, $2)', [user, amount]);
@@ -114,11 +110,94 @@ async function saveDebts(debts) {
     }
 }
 
+// ---- Football Match Functions ----
+
+async function getActiveMatch() {
+    if (!process.env.DATABASE_URL) return null;
+    try {
+        const res = await pool.query("SELECT * FROM football_matches WHERE status = 'OPEN' ORDER BY id DESC LIMIT 1");
+        return res.rows.length > 0 ? res.rows[0] : null;
+    } catch (e) {
+        console.error(e);
+        return null;
+    }
+}
+
+async function getMatchById(matchId) {
+    if (!process.env.DATABASE_URL) return null;
+    try {
+        const res = await pool.query('SELECT * FROM football_matches WHERE id = $1', [matchId]);
+        return res.rows.length > 0 ? res.rows[0] : null;
+    } catch (e) {
+        console.error(e);
+        return null;
+    }
+}
+
+async function createMatch() {
+    if (!process.env.DATABASE_URL) return null;
+    try {
+        const res = await pool.query("INSERT INTO football_matches (status) VALUES ('OPEN') RETURNING *");
+        return res.rows[0];
+    } catch (e) {
+        console.error(e);
+        return null;
+    }
+}
+
+async function updateMatchStatus(matchId, status) {
+    if (!process.env.DATABASE_URL) return;
+    try {
+        await pool.query('UPDATE football_matches SET status = $1 WHERE id = $2', [status, matchId]);
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function getMatchUsers(matchId) {
+    if (!process.env.DATABASE_URL) return [];
+    try {
+        const res = await pool.query('SELECT * FROM football_match_details WHERE match_id = $1 ORDER BY id ASC', [matchId]);
+        return res.rows;
+    } catch (e) {
+        console.error(e);
+        return [];
+    }
+}
+
+async function addMatchUser(matchId, username, slots) {
+    if (!process.env.DATABASE_URL) return;
+    try {
+        await pool.query(
+            'INSERT INTO football_match_details (match_id, username, slots) VALUES ($1, $2, $3) ON CONFLICT (match_id, username) DO UPDATE SET slots = football_match_details.slots + $3',
+            [matchId, username, slots]
+        );
+    } catch (e) {
+        console.error(e);
+    }
+}
+
+async function removeMatchUser(matchId, username) {
+    if (!process.env.DATABASE_URL) return;
+    try {
+        await pool.query('DELETE FROM football_match_details WHERE match_id = $1 AND username = $2', [matchId, username]);
+    } catch (e) {
+        console.error(e);
+    }
+}
+
 module.exports = {
     query: (text, params) => pool.query(text, params),
     initDB,
     getKV,
     setKV,
     getDebts,
-    saveDebts
+    saveDebts,
+    getActiveMatch,
+    getMatchById,
+    createMatch,
+    updateMatchStatus,
+    getMatchUsers,
+    addMatchUser,
+    removeMatchUser
 };
