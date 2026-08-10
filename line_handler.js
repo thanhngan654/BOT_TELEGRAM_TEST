@@ -343,10 +343,15 @@ if (text === '/menu') {
         }
 
         if (event.type === 'postback') {
-            if (event.postback.data === 'fb_add' || event.postback.data === 'fb_cancel') {
+            const data = event.postback.data;
+            const userId = event.source.userId;
+            let userName = 'Khách';
+            try { const profile = await lineClient.getProfile(userId); userName = profile.displayName; } catch(e) {}
+
+            if (data === 'fb_add' || data === 'fb_cancel') {
                 if (footballEvent.isLocked) return;
                 let replyText = '';
-                if (event.postback.data === 'fb_add') {
+                if (data === 'fb_add') {
                     footballEvent.users[userName] = (footballEvent.users[userName] || 0) + 1;
                     replyText = `Đã ghi nhận +1 cho ${userName}`;
                 } else {
@@ -356,11 +361,6 @@ if (text === '/menu') {
                 saveFootball();
                 return lineClient.replyMessage(event.replyToken, { type: 'text', text: replyText });
             }
-
-            const data = event.postback.data;
-            const userId = event.source.userId;
-            let userName = 'Khách';
-            try { const profile = await lineClient.getProfile(userId); userName = profile.displayName; } catch(e) {}
 
             if (data.startsWith('rest_')) {
                 const restId = data.replace('rest_', '');
