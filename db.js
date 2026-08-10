@@ -1,9 +1,14 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
+let dbUrl = process.env.DATABASE_URL || '';
+if (dbUrl.includes('channel_binding=require')) {
+    dbUrl = dbUrl.replace('&channel_binding=require', '').replace('?channel_binding=require', '');
+}
+
 const pool = new Pool({
-    connectionString: process.env.DATABASE_URL,
-    ssl: process.env.DATABASE_URL && process.env.DATABASE_URL.includes('render.com') ? { rejectUnauthorized: false } : false
+    connectionString: dbUrl,
+    ssl: (dbUrl.includes('render.com') || dbUrl.includes('neon.tech') || dbUrl.includes('sslmode=require')) ? { rejectUnauthorized: false } : false
 });
 
 async function initDB() {
