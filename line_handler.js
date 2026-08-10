@@ -1,5 +1,5 @@
 module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, saveDebts, footballEvent, saveFootball) {
-    const ADMIN_USERNAMES = (process.env.ADMIN_USERNAMES || 'thanhngan654,ngân nguyễn,ngan nguyen').split(',').map(s => s.trim().toLowerCase());
+    const ADMIN_USERNAMES = (process.env.ADMIN_USERNAMES || 'thanhngan654,ngân nguyễn,ngan nguyen,160817-ngân nguyễn').split(',').map(s => s.trim().toLowerCase());
     function isAdmin(user) {
         return ADMIN_USERNAMES.includes(user.toLowerCase());
     }
@@ -108,7 +108,7 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
             }
             
             if (text === '/chotsan') {
-                if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Bạn không có quyền Chốt sân. (Tên hiện tại: ' + userName + ')' });
+                if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Bạn không có quyền Chốt sân.' });
                 
                 if (!footballEvent.isActive || footballEvent.isLocked) {
                     return lineClient.replyMessage(replyToken, { type: 'text', text: 'Không có trận nào đang mở để chốt!' });
