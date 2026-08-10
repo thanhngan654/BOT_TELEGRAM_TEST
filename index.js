@@ -449,7 +449,7 @@ const LINE_GROUP_ID = process.env.LINE_GROUP_ID;
 
 if (lineClient) {
     app.post('/api/line/webhook', line.middleware(lineConfig), async (req, res) => {
-        Promise.all(req.body.events.map(require('./line_handler')(lineClient, menus, globalOrders, debts, saveOrders, saveDebts, footballEvent, saveFootball)))
+        Promise.all(req.body.events.map(require('./line_handler')(lineClient, menus, globalOrders, debts, saveOrders, saveDebts)))
             .then(() => res.status(200).end())
             .catch((err) => {
                 console.error(err);
