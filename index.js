@@ -397,6 +397,27 @@ bot.onText(/\/start/, async (msg) => {
 
 const app = express();
 const cors = require('cors');
+
+// --- LINE BOT CONFIG ---
+const line = require('@line/bot-sdk');
+const lineConfig = {
+    channelAccessToken: process.env.LINE_ACCESS_TOKEN,
+    channelSecret: process.env.LINE_CHANNEL_SECRET
+};
+const lineClient = (lineConfig.channelAccessToken && lineConfig.channelSecret) ? new line.Client(lineConfig) : null;
+const LINE_GROUP_ID = process.env.LINE_GROUP_ID;
+
+if (lineClient) {
+    app.post('/api/line/webhook', line.middleware(lineConfig), async (req, res) => {
+        Promise.all(req.body.events.map(require('./line_handler')(lineClient, menus, globalOrders, debts, saveOrders, saveDebts)))
+            .then(() => res.status(200).end())
+            .catch((err) => {
+                console.error(err);
+                res.status(500).end();
+            });
+    });
+}
+
 app.use(cors());
 app.use(express.json()); // Hỗ trợ đọc body dạng JSON
 
@@ -495,12 +516,17 @@ app.post('/api/sepay/webhook', async (req, res) => {
                 saveDebts();
                 
                 // Gửi thông báo lên Telegram Group
-                const msg = `🎉 <b>TINH TINH! ĐÃ NHẬN TIỀN</b>\n\n`
+                const successMsg = `🎉 <b>TINH TINH! ĐÃ NHẬN TIỀN</b>\n\n`
                           + `✅ Hệ thống tự động xác nhận đã nhận được <b>${amount.toLocaleString()}đ</b> qua MB Bank!\n`
                           + `🆔 Khớp với nội dung: <i>"${content}"</i>\n`
                           + `😎 Gạch nợ thành công cho: <b>@${foundUser}</b> (Nợ cũ: ${debtAmount.toLocaleString()}đ)`;
                           
-                bot.sendMessage(TELEGRAM_CHAT_ID, msg, { parse_mode: 'HTML' }).catch(console.error);
+                await bot.sendMessage(TELEGRAM_CHAT_ID, successMsg, { parse_mode: 'HTML' });
+                try {
+                    if (lineClient && LINE_GROUP_ID) {
+                        await lineClient.pushMessage(LINE_GROUP_ID, { type: 'text', text: successMsg.replace(/<[^>]*>?/gm, '') });
+                    }
+                } catch(e) { console.error('Lỗi gửi LINE:', e.message); }
                 
                 return res.json({ success: true, message: `Matched and cleared debt for ${foundUser}` });
             }
