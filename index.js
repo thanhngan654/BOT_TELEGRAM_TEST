@@ -674,7 +674,7 @@ bot.onText(/\/chotsan/, (msg) => {
     const user = msg.from.username || msg.from.first_name || 'Khách';
     if (!isAdmin(user)) return bot.sendMessage(msg.chat.id, '❌ Bạn không có quyền Chốt sân.');
     
-    if (!footballEvent.isActive || footballEvent.isLocked) {
+    if (!footballEvent.isActive) {
         return bot.sendMessage(msg.chat.id, 'Không có trận nào đang mở để chốt!');
     }
     

@@ -110,7 +110,7 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
             if (text === '/chotsan') {
                 if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Bạn không có quyền Chốt sân.' });
                 
-                if (!footballEvent.isActive || footballEvent.isLocked) {
+                if (!footballEvent.isActive) {
                     return lineClient.replyMessage(replyToken, { type: 'text', text: 'Không có trận nào đang mở để chốt!' });
                 }
                 
@@ -395,7 +395,7 @@ if (text === '/menu') {
             }
 
             if (data === 'fb_add' || data === 'fb_cancel') {
-                if (footballEvent.isLocked) return;
+                
                 let replyText = '';
                 if (data === 'fb_add') {
                     footballEvent.users[userName] = (footballEvent.users[userName] || 0) + 1;
