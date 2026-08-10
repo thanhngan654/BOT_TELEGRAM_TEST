@@ -11,10 +11,24 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
             const replyToken = event.replyToken;
             
             let userName = 'Khách';
-            try {
-                const profile = await lineClient.getProfile(userId);
-                userName = profile.displayName;
-            } catch(e) {}
+            if (userId) {
+                try {
+                    const profile = await lineClient.getProfile(userId);
+                    userName = profile.displayName;
+                } catch(e) {
+                    try {
+                        if (event.source.groupId) {
+                            const profile = await lineClient.getGroupMemberProfile(event.source.groupId, userId);
+                            userName = profile.displayName;
+                        } else if (event.source.roomId) {
+                            const profile = await lineClient.getRoomMemberProfile(event.source.roomId, userId);
+                            userName = profile.displayName;
+                        }
+                    } catch(err) {
+                        console.error('Không lấy được profile LINE:', err.message);
+                    }
+                }
+            }
 
             if (text === '/id') {
                 const idToUse = groupId || userId;
@@ -346,7 +360,24 @@ if (text === '/menu') {
             const data = event.postback.data;
             const userId = event.source.userId;
             let userName = 'Khách';
-            try { const profile = await lineClient.getProfile(userId); userName = profile.displayName; } catch(e) {}
+            if (userId) {
+                try {
+                    const profile = await lineClient.getProfile(userId);
+                    userName = profile.displayName;
+                } catch(e) {
+                    try {
+                        if (event.source.groupId) {
+                            const profile = await lineClient.getGroupMemberProfile(event.source.groupId, userId);
+                            userName = profile.displayName;
+                        } else if (event.source.roomId) {
+                            const profile = await lineClient.getRoomMemberProfile(event.source.roomId, userId);
+                            userName = profile.displayName;
+                        }
+                    } catch(err) {
+                        console.error('Không lấy được profile postback:', err.message);
+                    }
+                }
+            }
 
             if (data === 'fb_add' || data === 'fb_cancel') {
                 if (footballEvent.isLocked) return;
