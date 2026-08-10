@@ -720,6 +720,16 @@ bot.onText(/\/helpme/, (msg) => {
     bot.sendMessage(msg.chat.id, text, { parse_mode: 'HTML' });
 });
 
+
+bot.onText(/\/member/, (msg) => {
+    const users = Object.keys(debts);
+    if (users.length === 0) return bot.sendMessage(msg.chat.id, 'Chưa có dữ liệu thành viên nào trong hệ thống.');
+    let text = '👥 <b>DANH SÁCH THÀNH VIÊN ĐÃ TƯƠNG TÁC:</b>\n';
+    users.forEach((u, i) => { text += `${i+1}. ${u}\n`; });
+    text += '\n👉 Bạn có thể copy tên ở trên để dùng cho lệnh /xacnhan.';
+    bot.sendMessage(msg.chat.id, text, { parse_mode: 'HTML' });
+});
+
 bot.onText(/\/tienno/, (msg) => {
     const chatId = msg.chat.id;
     let text = '💰 <b>DANH SÁCH CÔNG NỢ:</b>\n\n';

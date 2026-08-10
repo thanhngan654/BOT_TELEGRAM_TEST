@@ -137,6 +137,16 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
                 return lineClient.replyMessage(replyToken, { type: 'text', text: helpText });
             }
             
+            
+            if (text === '/member') {
+                const users = Object.keys(debts);
+                if (users.length === 0) return lineClient.replyMessage(replyToken, { type: 'text', text: 'Chưa có dữ liệu thành viên nào trong hệ thống.' });
+                let msgText = '👥 DANH SÁCH THÀNH VIÊN ĐÃ TƯƠNG TÁC:\n';
+                users.forEach((u, i) => { msgText += `${i+1}. ${u}\n`; });
+                msgText += '\n👉 Bạn có thể copy tên ở trên để dùng cho lệnh /xacnhan.';
+                return lineClient.replyMessage(replyToken, { type: 'text', text: msgText });
+            }
+
             if (text === '/tienno') {
                 let msg = '💰 DANH SÁCH CÔNG NỢ:\n\n';
                 let total = 0;
