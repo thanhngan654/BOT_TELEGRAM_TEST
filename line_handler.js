@@ -127,6 +127,11 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
                 return lineClient.replyMessage(replyToken, { type: 'text', text: `✅ ĐÃ CHỐT SÂN!\nTổng cộng ${totalSlots} người đã được cộng công nợ (40k/người) vào sổ.\nSử dụng /tienno để xem tổng nợ.` });
             }
             
+            
+            if (text === '/helpmebanh') {
+                const helpText = `⚽ DANH SÁCH LỆNH BÓNG ĐÁ:\n/diemdanh - Mở form điểm danh\n/dsbanh - Xem danh sách điểm danh\n/tienno - Xem ai nợ bao nhiêu tiền\n/thanhtoan - Lấy QR code thanh toán\n/huykeo (Admin) - Hủy trận bóng\n/chotsan (Admin) - Chốt bóng đá và cộng nợ\n/xacnhan Tên SốTiền (Admin) - Trừ nợ thủ công`;
+                return lineClient.replyMessage(replyToken, { type: 'text', text: helpText });
+            }
             if (text === '/helpme') {
                 const helpText = `📚 DANH SÁCH CÚ PHÁP:\n/menu - Xem menu gọi món\n/ds - Xem danh sách đặt món\n/huy - Hủy món đã đặt\n/diemdanh - Mở form điểm danh bóng đá\n/dsbanh - Xem danh sách bóng đá\n/tienno - Xem ai nợ bao nhiêu tiền\n/thanhtoan - Lấy QR code thanh toán nợ\n/huykeo (Admin) - Hủy trận bóng\n/chotsan (Admin) - Chốt bóng đá và cộng nợ\n/chotdon (Admin) - Chốt đơn cơm và cộng nợ\n/xacnhan Tên SốTiền (Admin) - Trừ nợ thủ công`;
                 return lineClient.replyMessage(replyToken, { type: 'text', text: helpText });

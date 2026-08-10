@@ -692,6 +692,18 @@ bot.onText(/\/chotsan/, (msg) => {
     bot.sendMessage(msg.chat.id, `✅ <b>ĐÃ CHỐT SÂN!</b>\nTổng cộng ${totalSlots} người đã được cộng công nợ (40k/người) vào sổ.\nSử dụng /tienno để xem tổng nợ.`, { parse_mode: 'HTML' });
 });
 
+
+bot.onText(/\/helpmebanh/, (msg) => {
+    const text = `⚽ <b>DANH SÁCH LỆNH BÓNG ĐÁ:</b>
+/diemdanh - Mở form điểm danh
+/dsbanh - Xem danh sách điểm danh
+/tienno - Xem ai nợ bao nhiêu tiền
+/thanhtoan - Lấy QR code thanh toán
+/huykeo (Admin) - Hủy trận bóng
+/chotsan (Admin) - Chốt bóng đá và cộng nợ
+/xacnhan Tên SốTiền (Admin) - Trừ nợ thủ công`;
+    bot.sendMessage(msg.chat.id, text, { parse_mode: 'HTML' });
+});
 bot.onText(/\/helpme/, (msg) => {
     const text = `📚 <b>DANH SÁCH CÚ PHÁP:</b>
 /menu - Xem menu gọi món
