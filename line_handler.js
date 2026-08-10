@@ -423,18 +423,26 @@ if (text === '/menu') {
                 }
             }
 
-            if (data === 'fb_add' || data === 'fb_cancel') {
-                
-                let replyText = '';
-                if (data === 'fb_add') {
-                    footballEvent.users[userName] = (footballEvent.users[userName] || 0) + 1;
-                    replyText = `Đã ghi nhận +1 cho ${userName}`;
-                } else {
-                    delete footballEvent.users[userName];
-                    replyText = `Đã hủy điểm danh của ${userName}`;
+            if (data.startsWith('fb_add_') || data.startsWith('fb_cancel_')) {
+                const parts = data.split('_');
+                const matchId = parseInt(parts[parts.length - 1]);
+                const isAdd = data.startsWith('fb_add_');
+                try {
+                    const db = require('./db');
+                    const footballMatch = await db.getMatchById(matchId);
+                    if (!footballMatch) return lineClient.replyMessage(event.replyToken, { type: 'text', text: 'Trận này không tồn tại!' });
+                    if (footballMatch.status !== 'OPEN') return lineClient.replyMessage(event.replyToken, { type: 'text', text: `Trận #${matchId} đã ${footballMatch.status === 'CLOSED' ? 'chốt' : 'bị hủy'}. Không thể thay đổi!` });
+                    if (isAdd) {
+                        await db.addMatchUser(matchId, userName, 1);
+                        return lineClient.replyMessage(event.replyToken, { type: 'text', text: `✅ Đã ghi nhận +1 cho ${userName} [Trận #${matchId}]` });
+                    } else {
+                        await db.removeMatchUser(matchId, userName);
+                        return lineClient.replyMessage(event.replyToken, { type: 'text', text: `🗑 Đã hủy điểm danh của ${userName} [Trận #${matchId}]` });
+                    }
+                } catch(e) {
+                    console.error('Lỗi postback bóng đá:', e);
+                    return lineClient.replyMessage(event.replyToken, { type: 'text', text: 'Có lỗi xảy ra: ' + e.message });
                 }
-                saveFootball();
-                return lineClient.replyMessage(event.replyToken, { type: 'text', text: replyText });
             }
 
             if (data.startsWith('rest_')) {
