@@ -741,9 +741,9 @@ bot.onText(/\/thanhtoan/, (msg) => {
     const bankId = 'MB';
     const accountNo = '03709868';
     const accountName = 'NGUYEN THANH NGAN';
-    const addInfo = `${userName} thanh toan`.replace(/ /g, '%20');
+    const addInfo = encodeURIComponent(`${userName} thanh toan`);
     
-    const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${accountName.replace(/ /g, '%20')}`;
+    const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${encodeURIComponent(accountName)}`;
     
     bot.sendPhoto(chatId, qrUrl, {
         caption: `💳 ${userName} đang nợ <b>${amount.toLocaleString()}đ</b>.\nQuét mã QR bên trên để thanh toán.\nNội dung CK: ${userName} thanh toan`,

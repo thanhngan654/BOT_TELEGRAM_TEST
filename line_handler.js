@@ -155,8 +155,8 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
                 const bankId = 'MB';
                 const accountNo = '03709868';
                 const accountName = 'NGUYEN THANH NGAN';
-                const addInfo = `${userName} thanh toan`.replace(/ /g, '%20');
-                const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${accountName.replace(/ /g, '%20')}`;
+                const addInfo = encodeURIComponent(`${userName} thanh toan`);
+                const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${encodeURIComponent(accountName)}`;
                 
                 return lineClient.replyMessage(replyToken, {
                     type: 'image',
