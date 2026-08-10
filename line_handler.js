@@ -108,7 +108,7 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
             }
             
             if (text === '/chotsan') {
-                if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Bạn không có quyền Chốt sân.' });
+                if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Bạn không có quyền Chốt sân. (Tên hiện tại: ' + userName + ')' });
                 
                 if (!footballEvent.isActive || footballEvent.isLocked) {
                     return lineClient.replyMessage(replyToken, { type: 'text', text: 'Không có trận nào đang mở để chốt!' });
