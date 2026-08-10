@@ -1,4 +1,8 @@
-module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, saveDebts) {
+module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, saveDebts, footballEvent, saveFootball) {
+    const ADMIN_USERNAMES = (process.env.ADMIN_USERNAMES || 'thanhngan654').split(',').map(s => s.trim().toLowerCase());
+    function isAdmin(user) {
+        return ADMIN_USERNAMES.includes(user.toLowerCase());
+    }
     return async function handleLineEvent(event) {
         if (event.type === 'message' && event.message.type === 'text') {
             const text = event.message.text.trim();
@@ -20,7 +24,144 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
                 });
             }
 
-            if (text === '/menu') {
+            
+            if (text === '/diemdanh') {
+                if (footballEvent.isLocked) {
+                    return lineClient.replyMessage(replyToken, { type: 'text', text: '⚠ Trận bóng đã chốt, không thể điểm danh thêm!' });
+                }
+                footballEvent.isActive = true;
+                saveFootball();
+                
+                const flexMessage = {
+                    type: 'flex',
+                    altText: 'Điểm danh đá banh',
+                    contents: {
+                        type: 'bubble',
+                        hero: {
+                            type: 'image',
+                            url: 'https://artlive.vn/wp-content/uploads/2024/03/image-116.png',
+                            size: 'full',
+                            aspectRatio: '20:13',
+                            aspectMode: 'cover'
+                        },
+                        body: {
+                            type: 'box',
+                            layout: 'vertical',
+                            contents: [
+                                { type: 'text', text: '⚽ ĐIỂM DANH ĐÁ BANH', weight: 'bold', size: 'xl' },
+                                { type: 'text', text: 'Anh em bấm nút bên dưới để báo cáo quân số nhé!', wrap: true }
+                            ]
+                        },
+                        footer: {
+                            type: 'box',
+                            layout: 'horizontal',
+                            spacing: 'sm',
+                            contents: [
+                                { type: 'button', style: 'primary', action: { type: 'postback', label: '+1 người', data: 'fb_add' } },
+                                { type: 'button', style: 'secondary', action: { type: 'postback', label: 'Cancel', data: 'fb_cancel' } }
+                            ]
+                        }
+                    }
+                };
+                return lineClient.replyMessage(replyToken, flexMessage);
+            }
+            
+            if (text === '/dsbanh') {
+                if (!footballEvent.isActive) return lineClient.replyMessage(replyToken, { type: 'text', text: 'Chưa có trận bóng nào đang mở.' });
+                
+                let msgText = '⚽ DANH SÁCH ĐIỂM DANH BÓNG ĐÁ:\n\n';
+                let totalSlots = 0;
+                for (const [user, slots] of Object.entries(footballEvent.users)) {
+                    msgText += `- ${user}: ${slots} người\n`;
+                    totalSlots += slots;
+                }
+                
+                if (totalSlots === 0) msgText += 'Chưa có ai điểm danh.\n';
+                else msgText += `\n=> Tổng cộng: ${totalSlots} người (Dự kiến ${(totalSlots * 40).toLocaleString()}k)`;
+                if (footballEvent.isLocked) msgText += '\n🔒 TRẬN ĐÃ CHỐT!';
+                
+                return lineClient.replyMessage(replyToken, { type: 'text', text: msgText });
+            }
+            
+            if (text === '/huykeo') {
+                if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Bạn không có quyền Hủy kèo.' });
+                
+                footballEvent.isActive = false;
+                footballEvent.isLocked = false;
+                footballEvent.users = {};
+                saveFootball();
+                return lineClient.replyMessage(replyToken, { type: 'text', text: '🗑 Trận bóng đã bị hủy. Đã reset danh sách.' });
+            }
+            
+            if (text === '/chotsan') {
+                if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Bạn không có quyền Chốt sân.' });
+                
+                if (!footballEvent.isActive || footballEvent.isLocked) {
+                    return lineClient.replyMessage(replyToken, { type: 'text', text: 'Không có trận nào đang mở để chốt!' });
+                }
+                
+                footballEvent.isLocked = true;
+                let totalSlots = 0;
+                for (const [u, slots] of Object.entries(footballEvent.users)) {
+                    if (!debts[u]) debts[u] = 0;
+                    debts[u] += slots * 40000;
+                    totalSlots += slots;
+                }
+                saveFootball();
+                saveDebts();
+                
+                return lineClient.replyMessage(replyToken, { type: 'text', text: `✅ ĐÃ CHỐT SÂN!\nTổng cộng ${totalSlots} người đã được cộng công nợ (40k/người) vào sổ.\nSử dụng /tienno để xem tổng nợ.` });
+            }
+            
+            if (text === '/helpme') {
+                const helpText = `📚 DANH SÁCH CÚ PHÁP:\n/menu - Xem menu gọi món\n/ds - Xem danh sách đặt món\n/huy - Hủy món đã đặt\n/diemdanh - Mở form điểm danh bóng đá\n/dsbanh - Xem danh sách bóng đá\n/tienno - Xem ai nợ bao nhiêu tiền\n/thanhtoan - Lấy QR code thanh toán nợ\n/huykeo (Admin) - Hủy trận bóng\n/chotsan (Admin) - Chốt bóng đá và cộng nợ\n/chotdon (Admin) - Chốt đơn cơm và cộng nợ\n/xacnhan Tên SốTiền (Admin) - Trừ nợ thủ công`;
+                return lineClient.replyMessage(replyToken, { type: 'text', text: helpText });
+            }
+            
+            if (text === '/tienno') {
+                let msg = '💰 DANH SÁCH CÔNG NỢ:\n\n';
+                let total = 0;
+                let hasDebt = false;
+                for (const user in debts) {
+                    if (debts[user] > 0) {
+                        msg += `👩🏻 ${user}: ${debts[user].toLocaleString()}đ\n`;
+                        total += debts[user];
+                        hasDebt = true;
+                    }
+                }
+                if (!hasDebt) msg = '🎉 Tuyệt vời! Hiện tại không có ai nợ tiền.';
+                else msg += `\n=> TỔNG NỢ: ${total.toLocaleString()}đ\n👉 Gõ /thanhtoan để lấy mã QR thanh toán.`;
+                return lineClient.replyMessage(replyToken, { type: 'text', text: msg });
+            }
+            
+            if (text === '/thanhtoan') {
+                const amount = debts[userName] || 0;
+                if (amount <= 0) return lineClient.replyMessage(replyToken, { type: 'text', text: `${userName} ơi, bạn không có nợ gì cả. Tuyệt vời! 🥳` });
+                
+                const bankId = 'MB';
+                const accountNo = '03709868';
+                const accountName = 'NGUYEN THANH NGAN';
+                const addInfo = `${userName} thanh toan`.replace(/ /g, '%20');
+                const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${accountName.replace(/ /g, '%20')}`;
+                
+                return lineClient.replyMessage(replyToken, {
+                    type: 'image',
+                    originalContentUrl: qrUrl,
+                    previewImageUrl: qrUrl
+                });
+            }
+            
+            const xacnhanMatch = text.match(/^\/xacnhan (.+) (\d+)$/);
+            if (xacnhanMatch) {
+                if (!isAdmin(userName)) return lineClient.replyMessage(replyToken, { type: 'text', text: '❌ Chỉ Admin mới được dùng lệnh này.' });
+                const targetUser = xacnhanMatch[1].trim();
+                const amount = parseInt(xacnhanMatch[2], 10);
+                if (!debts[targetUser]) return lineClient.replyMessage(replyToken, { type: 'text', text: `Không tìm thấy nợ của ${targetUser}.` });
+                debts[targetUser] = Math.max(0, debts[targetUser] - amount);
+                saveDebts();
+                return lineClient.replyMessage(replyToken, { type: 'text', text: `✅ Đã trừ ${amount.toLocaleString()}đ cho ${targetUser}. Nợ còn lại: ${debts[targetUser].toLocaleString()}đ.` });
+            }
+if (text === '/menu') {
                 if (menus.length === 0) {
                     return lineClient.replyMessage(replyToken, { type: 'text', text: '⚡ Hiện chưa có danh sách quán ăn nào.' });
                 }
@@ -202,6 +343,20 @@ module.exports = function(lineClient, menus, globalOrders, debts, saveOrders, sa
         }
 
         if (event.type === 'postback') {
+            if (event.postback.data === 'fb_add' || event.postback.data === 'fb_cancel') {
+                if (footballEvent.isLocked) return;
+                let replyText = '';
+                if (event.postback.data === 'fb_add') {
+                    footballEvent.users[userName] = (footballEvent.users[userName] || 0) + 1;
+                    replyText = `Đã ghi nhận +1 cho ${userName}`;
+                } else {
+                    delete footballEvent.users[userName];
+                    replyText = `Đã hủy điểm danh của ${userName}`;
+                }
+                saveFootball();
+                return lineClient.replyMessage(event.replyToken, { type: 'text', text: replyText });
+            }
+
             const data = event.postback.data;
             const userId = event.source.userId;
             let userName = 'Khách';

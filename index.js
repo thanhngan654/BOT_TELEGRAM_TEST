@@ -19,17 +19,64 @@ const ORDERS_FILE = path.join(__dirname, 'orders.json');
 const MENU_FILE = path.join(__dirname, 'menu.json');
 const DEBTS_FILE = path.join(__dirname, 'debts.json');
 
+const db = require('./db');
+
 // --- QUẢN LÝ BỘ NHỚ ---
 let menus = [];
 let globalOrders = {}; // Dữ liệu mới: { restId: { restName: 'A', users: { username: [ {name, price} ] } } }
 let debts = {};
+let footballEvent = { isActive: false, isLocked: false, users: {} };
 
-try { menus = JSON.parse(fs.readFileSync(MENU_FILE, 'utf8')); } catch (e) {}
-try { if (fs.existsSync(ORDERS_FILE)) globalOrders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8')); } catch (e) {}
-try { if (fs.existsSync(DEBTS_FILE)) debts = JSON.parse(fs.readFileSync(DEBTS_FILE, 'utf8')); } catch (e) {}
+async function startup() {
+    await db.initDB();
+    menus = await db.getKV('menus', []);
+    globalOrders = await db.getKV('globalOrders', {});
+    debts = await db.getDebts();
+    
+    // Migrate từ file cũ lên DB (nếu DB đang rỗng)
+    if (menus.length === 0 && fs.existsSync(MENU_FILE)) {
+        try { menus = JSON.parse(fs.readFileSync(MENU_FILE, 'utf8')); db.setKV('menus', menus); } catch(e){}
+    }
+    if (Object.keys(globalOrders).length === 0 && fs.existsSync(ORDERS_FILE)) {
+        try { globalOrders = JSON.parse(fs.readFileSync(ORDERS_FILE, 'utf8')); db.setKV('globalOrders', globalOrders); } catch(e){}
+    }
+    if (Object.keys(debts).length === 0 && fs.existsSync(DEBTS_FILE)) {
+        try { debts = JSON.parse(fs.readFileSync(DEBTS_FILE, 'utf8')); db.saveDebts(debts); } catch(e){}
+    }
+    
+    // Load Football State
+    try {
+        const stateRes = await db.query('SELECT * FROM football_state WHERE id = 1');
+        if (stateRes.rows.length > 0) {
+            footballEvent.isActive = stateRes.rows[0].is_active;
+            footballEvent.isLocked = stateRes.rows[0].is_locked;
+        }
+        const attRes = await db.query('SELECT * FROM football_attendance');
+        for (const row of attRes.rows) {
+            footballEvent.users[row.username] = row.slots;
+        }
+    } catch(e) { console.error('Lỗi load football state', e); }
+}
+startup();
 
-function saveOrders() { fs.writeFileSync(ORDERS_FILE, JSON.stringify(globalOrders, null, 2)); }
-function saveDebts() { fs.writeFileSync(DEBTS_FILE, JSON.stringify(debts, null, 2)); }
+function saveOrders() { db.setKV('globalOrders', globalOrders); }
+function saveDebts() { db.saveDebts(debts); }
+
+async function saveFootball() {
+    if (!process.env.DATABASE_URL) return;
+    try {
+        await db.query('UPDATE football_state SET is_active = $1, is_locked = $2 WHERE id = 1', [footballEvent.isActive, footballEvent.isLocked]);
+        await db.query('BEGIN');
+        await db.query('DELETE FROM football_attendance');
+        for (const [user, slots] of Object.entries(footballEvent.users)) {
+            await db.query('INSERT INTO football_attendance (username, slots) VALUES ($1, $2)', [user, slots]);
+        }
+        await db.query('COMMIT');
+    } catch(e) {
+        await db.query('ROLLBACK');
+        console.error(e);
+    }
+}
 
 
 
@@ -57,6 +104,23 @@ bot.onText(/\/menu/, async (msg) => {
 });
 
 bot.on('callback_query', async (query) => {
+        // Football handling
+        if (data === 'fb_add' || data === 'fb_cancel') {
+            if (footballEvent.isLocked) {
+                return bot.answerCallbackQuery(query.id, { text: 'Trận bóng đã chốt!', show_alert: true });
+            }
+            if (data === 'fb_add') {
+                footballEvent.users[user] = (footballEvent.users[user] || 0) + 1;
+                saveFootball();
+                return bot.answerCallbackQuery(query.id, { text: `Đã ghi nhận +1 cho ${user}` });
+            }
+            if (data === 'fb_cancel') {
+                delete footballEvent.users[user];
+                saveFootball();
+                return bot.answerCallbackQuery(query.id, { text: `Đã hủy điểm danh của ${user}` });
+            }
+        }
+
     try {
         const chatId = query.message.chat.id;
         const data = query.data;
@@ -404,12 +468,15 @@ const lineConfig = {
     channelAccessToken: process.env.LINE_ACCESS_TOKEN,
     channelSecret: process.env.LINE_CHANNEL_SECRET
 };
-const lineClient = (lineConfig.channelAccessToken && lineConfig.channelSecret) ? new line.Client(lineConfig) : null;
+let lineClient = null;
+if (lineConfig.channelAccessToken && lineConfig.channelSecret) {
+    lineClient = new line.Client(lineConfig);
+}
 const LINE_GROUP_ID = process.env.LINE_GROUP_ID;
 
 if (lineClient) {
     app.post('/api/line/webhook', line.middleware(lineConfig), async (req, res) => {
-        Promise.all(req.body.events.map(require('./line_handler')(lineClient, menus, globalOrders, debts, saveOrders, saveDebts)))
+        Promise.all(req.body.events.map(require('./line_handler')(lineClient, menus, globalOrders, debts, saveOrders, saveDebts, footballEvent, saveFootball)))
             .then(() => res.status(200).end())
             .catch((err) => {
                 console.error(err);
@@ -545,4 +612,158 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
     console.log(`✅ Web server giả đang chạy trên port ${PORT}`);
     console.log('✅ Bot Telegram đã khởi động và đang online!');
+});
+
+// --- XỬ LÝ ĐIỂM DANH BÓNG ĐÁ ---
+const ADMIN_USERNAMES = (process.env.ADMIN_USERNAMES || 'thanhngan654').split(',').map(s => s.trim().toLowerCase());
+function isAdmin(user) {
+    return ADMIN_USERNAMES.includes(user.toLowerCase());
+}
+
+bot.onText(/\/diemdanh/, async (msg) => {
+    const chatId = msg.chat.id;
+    if (footballEvent.isLocked) {
+        return bot.sendMessage(chatId, '⚠ Trận bóng đã chốt, không thể điểm danh thêm!');
+    }
+    footballEvent.isActive = true;
+    saveFootball();
+
+    const inlineKeyboard = [
+        [{ text: '+1 người', callback_data: 'fb_add' }, { text: 'Cancel', callback_data: 'fb_cancel' }]
+    ];
+
+    try {
+        await bot.sendPhoto(chatId, 'https://artlive.vn/wp-content/uploads/2024/03/image-116.png', {
+            caption: '⚽ <b>ĐIỂM DANH ĐÁ BANH</b>\nAnh em bấm nút bên dưới để báo cáo quân số nhé!',
+            parse_mode: 'HTML',
+            reply_markup: { inline_keyboard: inlineKeyboard }
+        });
+    } catch(e) { console.error(e); }
+});
+
+bot.onText(/\/dsbanh/, (msg) => {
+    const chatId = msg.chat.id;
+    if (!footballEvent.isActive) return bot.sendMessage(chatId, 'Chưa có trận bóng nào đang mở.');
+    
+    let msgText = '⚽ <b>DANH SÁCH ĐIỂM DANH BÓNG ĐÁ:</b>\n\n';
+    let totalSlots = 0;
+    for (const [user, slots] of Object.entries(footballEvent.users)) {
+        msgText += `- ${user}: ${slots} người\n`;
+        totalSlots += slots;
+    }
+    
+    if (totalSlots === 0) msgText += 'Chưa có ai điểm danh.\n';
+    else {
+        msgText += `\n=> Tổng cộng: ${totalSlots} người (Dự kiến ${(totalSlots * 40).toLocaleString()}k)`;
+    }
+    if (footballEvent.isLocked) msgText += '\n🔒 TRẬN ĐÃ CHỐT!';
+    
+    bot.sendMessage(chatId, msgText, { parse_mode: 'HTML' });
+});
+
+bot.onText(/\/huykeo/, (msg) => {
+    const user = msg.from.username || msg.from.first_name || 'Khách';
+    if (!isAdmin(user)) return bot.sendMessage(msg.chat.id, '❌ Bạn không có quyền Hủy kèo.');
+    
+    footballEvent = { isActive: false, isLocked: false, users: {} };
+    saveFootball();
+    bot.sendMessage(msg.chat.id, '🗑 Trận bóng đã bị hủy. Đã reset danh sách.');
+});
+
+bot.onText(/\/chotsan/, (msg) => {
+    const user = msg.from.username || msg.from.first_name || 'Khách';
+    if (!isAdmin(user)) return bot.sendMessage(msg.chat.id, '❌ Bạn không có quyền Chốt sân.');
+    
+    if (!footballEvent.isActive || footballEvent.isLocked) {
+        return bot.sendMessage(msg.chat.id, 'Không có trận nào đang mở để chốt!');
+    }
+    
+    footballEvent.isLocked = true;
+    let totalSlots = 0;
+    for (const [u, slots] of Object.entries(footballEvent.users)) {
+        if (!debts[u]) debts[u] = 0;
+        debts[u] += slots * 40000;
+        totalSlots += slots;
+    }
+    
+    saveFootball();
+    saveDebts();
+    
+    bot.sendMessage(msg.chat.id, `✅ <b>ĐÃ CHỐT SÂN!</b>\nTổng cộng ${totalSlots} người đã được cộng công nợ (40k/người) vào sổ.\nSử dụng /tienno để xem tổng nợ.`, { parse_mode: 'HTML' });
+});
+
+bot.onText(/\/helpme/, (msg) => {
+    const text = `📚 <b>DANH SÁCH CÚ PHÁP:</b>
+/menu - Xem menu gọi món
+/ds - Xem danh sách đặt món
+/huy - Hủy món đã đặt
+/diemdanh - Mở form điểm danh bóng đá
+/dsbanh - Xem danh sách bóng đá
+/tienno - Xem ai nợ bao nhiêu tiền
+/thanhtoan - Lấy QR code thanh toán nợ
+/huykeo (Admin) - Hủy trận bóng
+/chotsan (Admin) - Chốt bóng đá và cộng nợ
+/chotdon (Admin) - Chốt đơn cơm và cộng nợ
+/xacnhan Tên SốTiền (Admin) - Trừ nợ thủ công`;
+    bot.sendMessage(msg.chat.id, text, { parse_mode: 'HTML' });
+});
+
+bot.onText(/\/tienno/, (msg) => {
+    const chatId = msg.chat.id;
+    let text = '💰 <b>DANH SÁCH CÔNG NỢ:</b>\n\n';
+    let total = 0;
+    let hasDebt = false;
+    
+    for (const user in debts) {
+        if (debts[user] > 0) {
+            text += `👩🏻 ${user}: ${debts[user].toLocaleString()}đ\n`;
+            total += debts[user];
+            hasDebt = true;
+        }
+    }
+    
+    if (!hasDebt) text = '🎉 Tuyệt vời! Hiện tại không có ai nợ tiền.';
+    else text += `\n=> <b>TỔNG NỢ: ${total.toLocaleString()}đ</b>\n👉 Gõ /thanhtoan để lấy mã QR thanh toán.`;
+    
+    bot.sendMessage(chatId, text, { parse_mode: 'HTML' });
+});
+
+bot.onText(/\/thanhtoan/, (msg) => {
+    const chatId = msg.chat.id;
+    const userName = msg.from.username || msg.from.first_name || 'Khách';
+    const amount = debts[userName] || 0;
+    
+    if (amount <= 0) {
+        return bot.sendMessage(chatId, `${userName} ơi, bạn không có nợ gì cả. Tuyệt vời! 🥳`);
+    }
+    
+    // Tương tự lệnh /rc cũ
+    const bankId = 'MB';
+    const accountNo = '03709868';
+    const accountName = 'NGUYEN THANH NGAN';
+    const addInfo = `${userName} thanh toan`.replace(/ /g, '%20');
+    
+    const qrUrl = `https://img.vietqr.io/image/${bankId}-${accountNo}-compact2.png?amount=${amount}&addInfo=${addInfo}&accountName=${accountName.replace(/ /g, '%20')}`;
+    
+    bot.sendPhoto(chatId, qrUrl, {
+        caption: `💳 ${userName} đang nợ <b>${amount.toLocaleString()}đ</b>.\nQuét mã QR bên trên để thanh toán.\nNội dung CK: ${userName} thanh toan`,
+        parse_mode: 'HTML'
+    });
+});
+
+bot.onText(/\/xacnhan (.+) (\d+)/, (msg, match) => {
+    const user = msg.from.username || msg.from.first_name || 'Khách';
+    if (!isAdmin(user)) return bot.sendMessage(msg.chat.id, '❌ Chỉ Admin mới được dùng lệnh này.');
+    
+    const targetUser = match[1].trim();
+    const amount = parseInt(match[2], 10);
+    
+    if (!debts[targetUser]) {
+        return bot.sendMessage(msg.chat.id, `Không tìm thấy nợ của ${targetUser}.`);
+    }
+    
+    debts[targetUser] = Math.max(0, debts[targetUser] - amount);
+    saveDebts();
+    
+    bot.sendMessage(msg.chat.id, `✅ Đã trừ ${amount.toLocaleString()}đ cho ${targetUser}. Nợ còn lại: ${debts[targetUser].toLocaleString()}đ.`);
 });
