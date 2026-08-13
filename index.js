@@ -502,6 +502,22 @@ app.post('/api/menu', (req, res) => {
     }
 });
 
+// API Xóa toàn bộ menu
+app.post('/api/menu/reset', (req, res) => {
+    try {
+        const secretKey = req.body.secret_key;
+        if (secretKey !== 'sieubot123') {
+            return res.status(403).json({ error: 'Sai mật khẩu bảo mật' });
+        }
+        menus = [];
+        db.setKV('menus', menus);
+        res.json({ success: true, message: 'Đã xóa toàn bộ menu!' });
+    } catch (e) {
+        console.error('Lỗi API Reset Menu:', e);
+        res.status(500).json({ error: 'Lỗi server nội bộ' });
+    }
+});
+
 // API Nhận biến động số dư từ SePay
 app.post('/api/sepay/webhook', async (req, res) => {
     try {
